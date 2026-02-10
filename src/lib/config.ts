@@ -10,9 +10,9 @@ export interface AppConfig {
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
-  apiUrl: 'http://localhost:1234/v1',
+  apiUrl: 'http://127.0.0.1:1234/v1',
   apiKey: 'lm-studio',
-  modelName: 'local-model',
+  modelName: 'translategemma-4b-it',
   prompt: '你是一个专业的翻译助手。请将用户提供的文本翻译成中文。直接输出翻译结果，不要包含任何解释、拼音或其他无关内容。',
   debug: false,
   keepAliveEnabled: false,
