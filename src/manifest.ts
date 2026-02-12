@@ -3,7 +3,7 @@ import { defineManifest } from '@crxjs/vite-plugin'
 export default defineManifest({
   name: 'AI Translate Assistant',
   description: 'Translate text on hover using local LLM or OpenAI',
-  version: '1.0.1',
+  version: '1.0.2',
   manifest_version: 3,
   permissions: ['storage'],
   host_permissions: ['<all_urls>'],
