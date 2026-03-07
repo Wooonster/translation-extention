@@ -1,5 +1,16 @@
 # AI Translate Assistant（Chrome Extension）
 
+## 更新日志 (v1.0.4)
+- **Markdown 支持**：
+  - 翻译结果与追问回答现已支持 Markdown 渲染（加粗、列表、代码块等），阅读体验更佳。
+  - 代码块添加了语法高亮样式。
+- **源语言检测**：
+  - 翻译时自动检测源语言，并在悬浮框结果上方显示（如 `[SOURCE: ENGLISH]`）。
+  - 支持多语言界面切换（显示 `SOURCE:` 或 `原文：`）。
+- **UI/UX 优化**：
+  - 修复 Popup 界面输入框底部遮挡问题，增加内边距。
+  - 优化语言选择列表的显示格式（如 `English | 英语`）。
+
 ## 更新日志 (v1.0.3)
 - **多语言界面**：新增中英文界面切换（Popup → Settings → Interface Language）。
 - **悬浮框交互升级**：

@@ -46,6 +46,7 @@ const ContentApp = () => {
   )
   const [status, setStatus] = useState<'idle' | 'counting' | 'loading' | 'success' | 'error'>('idle')
   const [result, setResult] = useState<string>('')
+  const [sourceLang, setSourceLang] = useState<string>('')
   const [activeSelection, setActiveSelection] = useState<typeof selection>(null)
 
   // State machine logic
@@ -53,6 +54,7 @@ const ContentApp = () => {
     if (!floatingEnabled) {
       setStatus('idle')
       setResult('')
+      setSourceLang('')
       setActiveSelection(null)
       clearSelection()
       return
@@ -62,6 +64,7 @@ const ContentApp = () => {
       dlog('[AI Translate] Selection lost or cleared.')
       setStatus('idle')
       setResult('')
+      setSourceLang('')
       setActiveSelection(null)
     }
   }, [selection, status, floatingEnabled])
@@ -86,15 +89,24 @@ const ContentApp = () => {
       dlog('[AI Translate] Response from background:', { status: response?.status })
 
       if (response.status === 'success') {
-        setResult(response.data)
+        if (typeof response.data === 'object' && response.data !== null) {
+          setResult(response.data.text || '')
+          setSourceLang(response.data.sourceLang || '')
+        } else {
+          // Fallback for legacy response format or simple string
+          setResult(String(response.data || ''))
+          setSourceLang('')
+        }
         setStatus('success')
       } else {
         setResult(response.error || 'Unknown error')
+        setSourceLang('')
         setStatus('error')
       }
     } catch (e: any) {
       derr('[AI Translate] Translation error:', e)
       setResult(e.message || 'Communication error')
+      setSourceLang('')
       setStatus('error')
     }
   }
@@ -112,6 +124,7 @@ const ContentApp = () => {
   const handleClose = () => {
     setStatus('idle')
     setResult('')
+    setSourceLang('')
     setActiveSelection(null)
     clearSelection() // Was reset() before
   }
@@ -125,6 +138,7 @@ const ContentApp = () => {
       selectionKey={selectionKey}
       status={status}
       sourceText={activeSelection.text}
+      sourceLang={sourceLang}
       result={result}
       progress={hoverProgress}
       onFollowup={handleFollowup}

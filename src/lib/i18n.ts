@@ -49,6 +49,7 @@ export const i18n = {
       send: 'Send',
       error: 'Translation failed. Please try again.',
       askTooltip: 'Ask AI about this translation',
+      sourceLabel: 'SOURCE: ',
     }
   },
   zh: {
@@ -100,6 +101,7 @@ export const i18n = {
       send: '发送',
       error: '翻译失败，请重试。',
       askTooltip: '针对此翻译结果进行提问',
+      sourceLabel: '原文：',
     }
   }
 }

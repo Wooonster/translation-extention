@@ -110,10 +110,15 @@ async function handlePreload(): Promise<void> {
   }
 }
 
-async function handleTranslate(text: string, targetLangCode?: string, attempt?: number): Promise<string> {
+interface TranslateResponse {
+  sourceLang?: string
+  text: string
+}
+
+async function handleTranslate(text: string, targetLangCode?: string, attempt?: number): Promise<TranslateResponse> {
   const config = await getConfig()
   const normalizedText = String(text ?? '').trim()
-  if (!normalizedText) return ''
+  if (!normalizedText) return { text: '' }
   
   // Clean up API URL (remove trailing slash)
   let baseUrl = config.apiUrl.replace(/\/$/, '')
@@ -147,7 +152,14 @@ async function handleTranslate(text: string, targetLangCode?: string, attempt?: 
       targetLangCode: normalizedTargetLangCode,
     })
     const cached = await getCachedTranslation(cacheKey)
-    if (cached) return cached
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached)
+        if (parsed.text) return parsed
+      } catch {
+        return { text: cached }
+      }
+    }
     const isRetry = Number.isFinite(Number(attempt)) && Number(attempt) > 1
     const { temperature, top_p, top_k } = chooseSamplingParams({
       isTranslateGemma,
@@ -170,7 +182,7 @@ async function handleTranslate(text: string, targetLangCode?: string, attempt?: 
           {
             role: 'system',
             content: normalizedTargetLangCode
-              ? 'You are a professional translation assistant. Output only the translation result, without explanations.'
+              ? 'You are a professional translation assistant. First detect the language of the source text. Then output the detected source language in the format "[Source: LanguageName]" followed by a newline, and then the translation result. Do not include any other explanations.'
               : config.prompt,
           },
           {
@@ -202,10 +214,23 @@ async function handleTranslate(text: string, targetLangCode?: string, attempt?: 
 
     const data = await response.json()
     const content = data.choices?.[0]?.message?.content
-    if (!content) return 'No translation returned.'
-    const translated = stripEdgeNewlines(content)
-    await setCachedTranslation(cacheKey, translated)
-    return translated
+    if (!content) return { text: 'No translation returned.' }
+    
+    let sourceLang = ''
+    let translated = content
+    
+    // Parse [Source: Lang] format
+    const sourceMatch = content.match(/^\[Source:\s*([^\]]+)\]\s*([\s\S]*)$/i)
+    if (sourceMatch) {
+      sourceLang = sourceMatch[1].trim()
+      translated = sourceMatch[2].trim()
+    }
+
+    translated = stripEdgeNewlines(translated)
+    
+    const result = { sourceLang, text: translated }
+    await setCachedTranslation(cacheKey, JSON.stringify(result))
+    return result
   } catch (error: any) {
     derr('[AI Translate] Translation failed:', error)
     throw new Error(error.message || 'Network error')

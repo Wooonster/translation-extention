@@ -1,4 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import { getTranslation, type LanguageCode } from '../../lib/i18n'
 import { getConfig } from '../../lib/config'
 
@@ -7,13 +9,14 @@ interface FloatingBoxProps {
   selectionKey?: string
   status: 'idle' | 'counting' | 'loading' | 'success' | 'error'
   sourceText?: string
+  sourceLang?: string
   result?: string
   progress?: number // 0-100 for countdown
   onFollowup?: (query: string, sourceText: string, translatedText: string) => Promise<string>
   onClose?: () => void
 }
 
-const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, status, sourceText, result, progress = 0, onFollowup, onClose }) => {
+const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, status, sourceText, sourceLang, result, progress = 0, onFollowup, onClose }) => {
   if (status === 'idle') return null
 
   const basePosition = useMemo(() => ({ top: position.top + 10, left: position.left }), [position.left, position.top])
@@ -261,8 +264,15 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
             >
               {/* Page 1: Translation */}
               <div className="w-full shrink-0 max-h-64 overflow-y-auto px-5 py-4 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px]">
-                  {result}
+                {sourceLang && (
+                  <div className="text-[10px] font-medium text-slate-400 mb-2 uppercase tracking-wide">
+                    {t.floating.sourceLabel}{sourceLang}
+                  </div>
+                )}
+                <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px] max-w-none prose-p:my-1 prose-headings:text-slate-800 prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-slate-100 prose-code:px-1 prose-code:rounded prose-code:text-slate-800 prose-pre:bg-slate-50 prose-pre:p-2 prose-pre:rounded-lg">
+                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {result || ''}
+                  </ReactMarkdown>
                 </div>
               </div>
 
@@ -290,8 +300,10 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                           <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
                         </svg>
                       </div>
-                      <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px] flex-1">
-                        {item.answer}
+                      <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px] flex-1 max-w-none prose-p:my-1 prose-headings:text-slate-800 prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-slate-100 prose-code:px-1 prose-code:rounded prose-code:text-slate-800 prose-pre:bg-slate-50 prose-pre:p-2 prose-pre:rounded-lg">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                          {item.answer || ''}
+                        </ReactMarkdown>
                       </div>
                       <button
                         onClick={() => copyResult(item.answer)}
