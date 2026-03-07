@@ -111,3 +111,27 @@ export type LanguageCode = 'en' | 'zh'
 export const getTranslation = (lang: LanguageCode) => {
   return i18n[lang] || i18n.en
 }
+
+export const getLanguageName = (langCode: string, interfaceLang: LanguageCode): string => {
+  const map: Record<string, { en: string; zh: string }> = {
+    'en': { en: 'English', zh: '英语' },
+    'zh': { en: 'Chinese', zh: '中文' },
+    'zh-hans': { en: 'Chinese (Simplified)', zh: '简体中文' },
+    'zh-hant': { en: 'Chinese (Traditional)', zh: '繁体中文' },
+    'fr': { en: 'French', zh: '法语' },
+    'de': { en: 'German', zh: '德语' },
+    'ja': { en: 'Japanese', zh: '日语' },
+    'ko': { en: 'Korean', zh: '韩语' },
+    'ru': { en: 'Russian', zh: '俄语' },
+    'es': { en: 'Spanish', zh: '西班牙语' },
+    'pt': { en: 'Portuguese', zh: '葡萄牙语' },
+    'it': { en: 'Italian', zh: '意大利语' },
+    'ar': { en: 'Arabic', zh: '阿拉伯语' },
+    'hi': { en: 'Hindi', zh: '印地语' },
+  }
+  
+  const normalized = langCode.toLowerCase().trim()
+  const entry = map[normalized]
+  if (entry) return entry[interfaceLang] || entry.en
+  return langCode // Fallback to raw code if not found
+}

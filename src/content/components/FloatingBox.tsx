@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { getTranslation, type LanguageCode } from '../../lib/i18n'
+import { getTranslation, getLanguageName, type LanguageCode } from '../../lib/i18n'
 import { getConfig } from '../../lib/config'
 
 interface FloatingBoxProps {
@@ -266,7 +266,7 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
               <div className="w-full shrink-0 max-h-64 overflow-y-auto px-5 py-4 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
                 {sourceLang && (
                   <div className="text-[10px] font-medium text-slate-400 mb-2 uppercase tracking-wide">
-                    {t.floating.sourceLabel}{sourceLang}
+                    {t.floating.sourceLabel}{getLanguageName(sourceLang, lang)}
                   </div>
                 )}
                 <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px] max-w-none prose-p:my-1 prose-headings:text-slate-800 prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-slate-100 prose-code:px-1 prose-code:rounded prose-code:text-slate-800 prose-pre:bg-slate-50 prose-pre:p-2 prose-pre:rounded-lg">
