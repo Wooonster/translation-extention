@@ -1,4 +1,5 @@
 export interface AppConfig {
+  floatingEnabled: boolean
   apiUrl: string
   apiKey: string
   modelName: string
@@ -7,9 +8,11 @@ export interface AppConfig {
   keepAliveEnabled: boolean
   keepAliveIntervalSec: number
   hoverDurationMs: number
+  interfaceLanguage: 'en' | 'zh'
 }
 
 export const DEFAULT_CONFIG: AppConfig = {
+  floatingEnabled: true,
   apiUrl: 'http://127.0.0.1:1234/v1',
   apiKey: 'lm-studio',
   modelName: 'translategemma-4b-it',
@@ -18,6 +21,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   keepAliveEnabled: false,
   keepAliveIntervalSec: 60,
   hoverDurationMs: 3000,
+  interfaceLanguage: 'en',
 }
 
 export const saveConfig = (config: AppConfig): Promise<void> => {

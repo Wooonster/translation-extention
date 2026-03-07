@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useSelectionHover } from './hooks/useSelectionHover'
+import { useSelectionHover, type SelectionInfo } from './hooks/useSelectionHover'
 import FloatingBox from './components/FloatingBox'
 import { dlog, derr, initDebug } from '../lib/debug'
 import { getConfig } from '../lib/config'
@@ -8,11 +8,18 @@ initDebug()
 
 const ContentApp = () => {
   const [hoverDurationMs, setHoverDurationMs] = useState(3000)
+  const [floatingEnabled, setFloatingEnabled] = useState(true)
 
   useEffect(() => {
     getConfig()
-      .then(cfg => setHoverDurationMs(Number(cfg.hoverDurationMs) || 3000))
-      .catch(() => setHoverDurationMs(3000))
+      .then(cfg => {
+        setHoverDurationMs(Number(cfg.hoverDurationMs) || 3000)
+        setFloatingEnabled(cfg.floatingEnabled !== false)
+      })
+      .catch(() => {
+        setHoverDurationMs(3000)
+        setFloatingEnabled(true)
+      })
 
     const onChanged = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
       if (areaName !== 'sync') return
@@ -20,44 +27,61 @@ const ContentApp = () => {
       if (!next) return
       const ms = Number(next.hoverDurationMs)
       if (Number.isFinite(ms) && ms > 0) setHoverDurationMs(ms)
+      if (typeof next.floatingEnabled === 'boolean') setFloatingEnabled(next.floatingEnabled)
     }
 
     chrome.storage.onChanged.addListener(onChanged)
     return () => chrome.storage.onChanged.removeListener(onChanged)
   }, [])
 
-  const { selection, isHovering, hoverProgress, clearSelection } = useSelectionHover(
+  const { selection, hoverProgress, clearSelection } = useSelectionHover(
     // onTrigger callback
-    (text) => {
+    (text, triggerSelection) => {
       dlog('[AI Translate] onTrigger fired via callback!', { length: text.length })
-      handleTranslate(text)
+      setActiveSelection(triggerSelection)
+      handleTranslate(text, triggerSelection)
     },
-    hoverDurationMs
+    hoverDurationMs,
+    floatingEnabled
   )
   const [status, setStatus] = useState<'idle' | 'counting' | 'loading' | 'success' | 'error'>('idle')
   const [result, setResult] = useState<string>('')
+  const [activeSelection, setActiveSelection] = useState<typeof selection>(null)
 
   // State machine logic
   useEffect(() => {
-    if (isHovering) {
-      // User request: Don't show anything while counting down
-    } else if (!selection) {
+    if (!floatingEnabled) {
+      setStatus('idle')
+      setResult('')
+      setActiveSelection(null)
+      clearSelection()
+      return
+    }
+
+    if (!selection && status === 'idle') {
       dlog('[AI Translate] Selection lost or cleared.')
       setStatus('idle')
       setResult('')
-    } else {
-      // Selection exists but not hovering/triggered
-      if (status === 'counting') setStatus('idle')
+      setActiveSelection(null)
     }
-  }, [isHovering, selection])
+  }, [selection, status, floatingEnabled])
 
-  const handleTranslate = async (text: string) => {
+  useEffect(() => {
+    if (selection) setActiveSelection(selection)
+  }, [selection])
+
+  const handleTranslate = async (text: string, triggerSelection?: SelectionInfo) => {
+    const trimmedText = text.trim()
+    if (!trimmedText) return
     setStatus('loading')
-    
+    if (triggerSelection) setActiveSelection(triggerSelection)
+    else if (selection) setActiveSelection(selection)
+    const targetLangCode = 'zh'
+
     try {
       const response = await chrome.runtime.sendMessage({
         action: 'TRANSLATE',
-        payload: { text }
+        payload: { text: trimmedText, targetLangCode }
       })
       dlog('[AI Translate] Response from background:', { status: response?.status })
 
@@ -75,20 +99,35 @@ const ContentApp = () => {
     }
   }
 
+  const handleFollowup = async (query: string, sourceText: string, translatedText: string): Promise<string> => {
+    const response = await chrome.runtime.sendMessage({
+      action: 'FOLLOWUP',
+      payload: { query, sourceText, translatedText },
+    })
+
+    if (response?.status === 'success') return String(response.data || '')
+    throw new Error(response?.error || 'Interaction failed')
+  }
+
   const handleClose = () => {
     setStatus('idle')
     setResult('')
+    setActiveSelection(null)
     clearSelection() // Was reset() before
   }
 
-  if (!selection || status === 'idle') return null
+  if (!activeSelection || status === 'idle') return null
+  const selectionKey = `${activeSelection.text}|${activeSelection.boundingRect.top},${activeSelection.boundingRect.left},${activeSelection.boundingRect.right},${activeSelection.boundingRect.bottom}`
 
   return (
     <FloatingBox
-      position={{ top: selection.boundingRect.bottom, left: selection.boundingRect.left }}
+      position={{ top: activeSelection.boundingRect.bottom, left: activeSelection.boundingRect.left }}
+      selectionKey={selectionKey}
       status={status}
+      sourceText={activeSelection.text}
       result={result}
       progress={hoverProgress}
+      onFollowup={handleFollowup}
       onClose={handleClose}
     />
   )

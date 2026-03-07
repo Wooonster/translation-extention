@@ -10,13 +10,13 @@ interface Rect {
   bottom: number
 }
 
-interface SelectionInfo {
+export interface SelectionInfo {
   text: string
   rects: Rect[] 
   boundingRect: Rect
 }
 
-export const useSelectionHover = (onTrigger: (text: string) => void, hoverDuration = 3000) => {
+export const useSelectionHover = (onTrigger: (text: string, selection: SelectionInfo) => void, hoverDuration = 3000, enabled = true) => {
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
   const [isHovering, setIsHovering] = useState(false)
   const [hoverProgress, setHoverProgress] = useState(0) // 0-100
@@ -44,7 +44,7 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
   const computeIsInside = (pos: { x: number; y: number }, sel: SelectionInfo) => {
     const { x: clientX, y: clientY } = pos
 
-    const rectBuffer = 20
+    const rectBuffer = 12
     const insideAnyRect = sel.rects.some(rect => {
       return (
         clientX >= rect.left - rectBuffer &&
@@ -54,12 +54,13 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
       )
     })
 
-    const boundingBuffer = 30
-    const insideBoundingRect =
-      clientX >= sel.boundingRect.left - boundingBuffer &&
-      clientX <= sel.boundingRect.right + boundingBuffer &&
-      clientY >= sel.boundingRect.top - boundingBuffer &&
-      clientY <= sel.boundingRect.bottom + boundingBuffer
+    const nearestDistance = sel.rects.reduce((minDist, rect) => {
+      const dx = Math.max(rect.left - clientX, 0, clientX - rect.right)
+      const dy = Math.max(rect.top - clientY, 0, clientY - rect.bottom)
+      const dist = Math.hypot(dx, dy)
+      return Math.min(minDist, dist)
+    }, Number.POSITIVE_INFINITY)
+    const insideBoundingRect = nearestDistance <= 16
 
     return {
       isInside: insideAnyRect || insideBoundingRect,
@@ -68,7 +69,17 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
     }
   }
 
+  const shouldSkipSelection = (text: string) => {
+    const trimmed = text.trim()
+    if (!trimmed) return true
+    const hasCjk = /[\u4e00-\u9fff]/.test(trimmed)
+    const hasLatin = /[A-Za-z]/.test(trimmed)
+    return hasCjk && !hasLatin
+  }
+
   useEffect(() => {
+    if (!enabled) return
+
     const handleSelectionChange = () => {
       const sel = window.getSelection()
       if (!sel || sel.isCollapsed || !sel.toString().trim()) {
@@ -78,6 +89,17 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
         setHoverProgress(0)
         clearTimers()
         resetHoverState()
+        return
+      }
+      const selectedText = sel.toString()
+      if (shouldSkipSelection(selectedText)) {
+        setSelection(null)
+        selectionRef.current = null
+        setIsHovering(false)
+        setHoverProgress(0)
+        clearTimers()
+        resetHoverState()
+        dlog('[AI Translate] Skip Chinese selection.')
         return
       }
 
@@ -92,7 +114,7 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
       if (boundingRect.width === 0 || boundingRect.height === 0) return
 
       const newSelection = {
-        text: sel.toString(),
+        text: selectedText,
         rects: clientRects,
         boundingRect: {
           top: boundingRect.top,
@@ -131,9 +153,11 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
       document.removeEventListener('mouseup', handleMouseUp)
       document.removeEventListener('keyup', handleSelectionChange)
     }
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
+    if (!enabled) return
+
     const handleMouseMove = (e: MouseEvent) => {
       lastMousePosRef.current = { x: e.clientX, y: e.clientY }
 
@@ -152,9 +176,17 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
     return () => {
       document.removeEventListener('mousemove', handleMouseMove)
     }
-  }, [])
+  }, [enabled])
 
   useEffect(() => {
+    if (!enabled) {
+      setSelection(null)
+      selectionRef.current = null
+      clearTimers()
+      resetHoverState()
+      return
+    }
+
     if (!selection) {
       clearTimers()
       resetHoverState()
@@ -164,25 +196,7 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
     const handleMouseMove = (e: MouseEvent) => {
       const { clientX, clientY } = e
       lastMousePosRef.current = { x: clientX, y: clientY }
-      
-      // Check if point is inside ANY of the selection rects
-      const rectBuffer = 20
-      const insideAnyRect = selection.rects.some(rect => {
-        return (
-          clientX >= rect.left - rectBuffer &&
-          clientX <= rect.right + rectBuffer &&
-          clientY >= rect.top - rectBuffer &&
-          clientY <= rect.bottom + rectBuffer
-        )
-      })
-      const boundingBuffer = 30
-      const insideBoundingRect =
-        clientX >= selection.boundingRect.left - boundingBuffer &&
-        clientX <= selection.boundingRect.right + boundingBuffer &&
-        clientY >= selection.boundingRect.top - boundingBuffer &&
-        clientY <= selection.boundingRect.bottom + boundingBuffer
-
-      const isInside = insideAnyRect || insideBoundingRect
+      const { isInside, insideAnyRect, insideBoundingRect } = computeIsInside(lastMousePosRef.current, selection)
       isInsideRef.current = isInside
 
       // Debug log every 500ms to avoid spamming
@@ -219,7 +233,7 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
       clearTimers()
       resetHoverState()
     }
-  }, [selection, isHovering])
+  }, [selection, isHovering, enabled])
 
   const startHoverMonitor = () => {
     setIsHovering(true)
@@ -269,7 +283,7 @@ export const useSelectionHover = (onTrigger: (text: string) => void, hoverDurati
         dlog('[AI Translate] Hover reached duration. Calling onTrigger.')
         stopHoverMonitor()
         const currentSelection = selectionRef.current
-        if (currentSelection) onTriggerRef.current(currentSelection.text)
+        if (currentSelection) onTriggerRef.current(currentSelection.text, currentSelection)
         else derr('[AI Translate] Triggered but selectionRef is null')
       }
     }, 50)
