@@ -1,6 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
-import { DEFAULT_CONFIG, getConfig, saveConfig, type AppConfig } from '../lib/config'
+import {
+  DEFAULT_CONFIG,
+  HOVER_DURATION_DEFAULT_MS,
+  HOVER_DURATION_MAX_MS,
+  HOVER_DURATION_MIN_MS,
+  getConfig,
+  saveConfig,
+  type ApiProvider,
+  type AppConfig,
+  type ProviderConfig,
+} from '../lib/config'
 import { getTranslation } from '../lib/i18n'
 import '../index.css'
 
@@ -15,6 +25,8 @@ const LANGUAGE_OPTIONS: Array<{ label: string; value: string }> = [
   { label: 'Русский | 俄语', value: 'ru' },
   { label: 'Português | 葡萄牙语', value: 'pt' },
 ]
+
+const API_PROVIDER_TABS: ApiProvider[] = ['lmStudio', 'lmApiServer', 'ollama']
 
 const Popup = () => {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG)
@@ -35,10 +47,38 @@ const Popup = () => {
   const [loading, setLoading] = useState(false)
 
   const t = getTranslation(config.interfaceLanguage)
+  const activeProviderConfig: ProviderConfig = config.providers[config.activeApiProvider]
+
+  const providerLabelMap: Record<ApiProvider, string> = {
+    lmStudio: t.popup.providerLmStudio,
+    lmApiServer: t.popup.providerLmApiServer,
+    ollama: t.popup.providerOllama,
+  }
+  const hasNeedOutput = needLoading || Boolean(needResult) || Boolean(needError)
+  const isStatusError = status.includes('Failed') || status.includes('Error')
+  const activeTargetLanguage = LANGUAGE_OPTIONS.find(option => option.value === needTargetLangCode)?.label ?? needTargetLangCode
+
+  const normalizeHoverDuration = (value: number) => {
+    if (!Number.isFinite(value)) return HOVER_DURATION_DEFAULT_MS
+    return Math.min(HOVER_DURATION_MAX_MS, Math.max(HOVER_DURATION_MIN_MS, Math.round(value)))
+  }
+
+  const extractTranslateText = (data: unknown): string => {
+    if (typeof data === 'string') return data
+    if (typeof data === 'object' && data !== null) {
+      const text = (data as { text?: unknown }).text
+      if (typeof text === 'string') return text
+    }
+    return ''
+  }
 
   useEffect(() => {
     getConfig().then(setConfig)
   }, [])
+
+  useEffect(() => {
+    document.title = t.popup.title
+  }, [t.popup.title])
 
   useEffect(() => {
     setNeedAttempt(0)
@@ -84,6 +124,39 @@ const Popup = () => {
     await saveConfig(nextConfig)
   }
 
+  const handleToggleFloatingStreamEnabled = async () => {
+    const nextConfig = { ...config, floatingStreamEnabled: !config.floatingStreamEnabled }
+    setConfig(nextConfig)
+    await saveConfig(nextConfig)
+  }
+
+  const updateActiveProviderConfig = (patch: Partial<ProviderConfig>) => {
+    const nextProviderConfig = { ...activeProviderConfig, ...patch }
+    setConfig({
+      ...config,
+      providers: {
+        ...config.providers,
+        [config.activeApiProvider]: nextProviderConfig,
+      },
+      apiUrl: nextProviderConfig.apiUrl,
+      apiKey: nextProviderConfig.apiKey,
+      modelName: nextProviderConfig.modelName,
+      prompt: nextProviderConfig.prompt,
+    })
+  }
+
+  const handleProviderTabChange = (provider: ApiProvider) => {
+    const nextProviderConfig = config.providers[provider]
+    setConfig({
+      ...config,
+      activeApiProvider: provider,
+      apiUrl: nextProviderConfig.apiUrl,
+      apiKey: nextProviderConfig.apiKey,
+      modelName: nextProviderConfig.modelName,
+      prompt: nextProviderConfig.prompt,
+    })
+  }
+
   const handleNeedTranslate = async () => {
     const text = needText.trim()
     if (!text) return
@@ -101,7 +174,7 @@ const Popup = () => {
       })
 
       if (response.status === 'success') {
-        setNeedResult(response.data || '')
+        setNeedResult(extractTranslateText(response.data))
       } else {
         setNeedError(response.error || 'Unknown error')
       }
@@ -139,53 +212,66 @@ const Popup = () => {
   }
 
   return (
-    <div className="w-[360px] min-h-[480px] bg-slate-50 flex flex-col font-sans text-slate-800">
-      {/* Header */}
-      <div className="bg-white px-4 py-3 border-b border-slate-200 flex justify-between items-center shadow-sm sticky top-0 z-10">
-        <h1 className="text-base font-bold flex items-center gap-2 text-slate-800">
-          <span className="w-5 h-5 bg-blue-600 rounded text-white flex items-center justify-center text-[10px] font-black">AI</span>
-          {t.popup.title}
-        </h1>
-        {status && (
-          <span className={`text-[10px] font-medium px-2 py-0.5 rounded-full transition-all ${status.includes('Failed') || status.includes('Error') ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-            {status}
-          </span>
-        )}
+    <div className="popup-shell" data-tab={activeTab} data-loading={needLoading ? 'true' : 'false'}>
+      <div className="popup-topbar popup-reveal popup-reveal--1">
+        <div className="popup-header">
+          <div>
+            <span className="popup-kicker">{providerLabelMap[config.activeApiProvider]}</span>
+            <h1 className="popup-title">{t.popup.title}</h1>
+            <p className="popup-subtitle">
+              {activeTab === 'translate' ? t.popup.inputPlaceholder : t.popup.apiConfigTitle}
+            </p>
+          </div>
+          <div className="popup-header-side">
+            <span className="popup-chip">{config.interfaceLanguage.toUpperCase()}</span>
+            {status && (
+              <span className="popup-status" data-tone={isStatusError ? 'error' : 'success'}>
+                {status}
+              </span>
+            )}
+          </div>
+        </div>
+
+        <div className="popup-tabs">
+          <button
+            onClick={() => setActiveTab('translate')}
+            className="popup-tab"
+            data-active={activeTab === 'translate'}
+          >
+            {t.popup.tabTranslator}
+          </button>
+          <button
+            onClick={() => setActiveTab('settings')}
+            className="popup-tab"
+            data-active={activeTab === 'settings'}
+          >
+            {t.popup.tabSettings}
+          </button>
+        </div>
       </div>
 
-      {/* Tabs */}
-      <div className="flex bg-white border-b border-slate-200 px-1">
-        <button
-          onClick={() => setActiveTab('translate')}
-          className={`flex-1 py-2 text-xs font-semibold border-b-2 transition-colors ${
-            activeTab === 'translate'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          {t.popup.tabTranslator}
-        </button>
-        <button
-          onClick={() => setActiveTab('settings')}
-          className={`flex-1 py-2 text-xs font-semibold border-b-2 transition-colors ${
-            activeTab === 'settings'
-              ? 'border-blue-600 text-blue-600'
-              : 'border-transparent text-slate-500 hover:text-slate-700'
-          }`}
-        >
-          {t.popup.tabSettings}
-        </button>
-      </div>
-
-      {/* Content */}
-      <div className="flex-1 overflow-y-auto">
+      <div className="popup-scroll">
         {activeTab === 'translate' ? (
-          <div className="p-4 space-y-4">
-            {/* Input Area */}
-            <div className="relative">
+          <div className="popup-stack">
+            <section className="popup-panel popup-panel--hero popup-reveal popup-reveal--2">
+              <div className="popup-row">
+                <span className="popup-caption">{t.popup.toLabel}</span>
+                <select
+                  className="popup-select max-w-[190px]"
+                  value={needTargetLangCode}
+                  onChange={e => setNeedTargetLangCode(e.target.value)}
+                >
+                  {LANGUAGE_OPTIONS.map(opt => (
+                    <option key={opt.value} value={opt.value}>
+                      {opt.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <textarea
                 ref={needTextareaRef}
-                className="w-full text-sm p-3 pb-12 rounded-lg border border-slate-200 shadow-sm outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 bg-white resize-none transition-all placeholder:text-slate-400"
+                className="popup-textarea"
                 placeholder={t.popup.inputPlaceholder}
                 value={needText}
                 onChange={e => setNeedText(e.target.value)}
@@ -193,16 +279,18 @@ const Popup = () => {
                   if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleNeedTranslate()
                 }}
               />
-              <div className="absolute bottom-3 right-3">
+
+              <div className="popup-panel-actions mt-4">
+                <span className="popup-helper">Ctrl/Cmd + Enter</span>
                 <button
                   type="button"
                   onClick={handleNeedTranslate}
                   disabled={needLoading || !needText.trim()}
-                  className="bg-blue-600 text-white text-xs font-medium px-3 py-1.5 rounded-md hover:bg-blue-700 disabled:bg-slate-300 disabled:cursor-not-allowed transition-colors shadow-sm flex items-center gap-1"
+                  className="popup-action-primary"
                 >
                   {needLoading ? (
                     <>
-                      <div className="w-3 h-3 border-2 border-white/30 border-t-white rounded-full animate-spin" />
+                      <div className="popup-spinner" />
                       <span>{t.popup.transLoading}</span>
                     </>
                   ) : (
@@ -210,222 +298,248 @@ const Popup = () => {
                   )}
                 </button>
               </div>
-            </div>
 
-            {/* Target Language */}
-            <div className="flex items-center gap-2">
-              <span className="text-xs font-medium text-slate-500">{t.popup.toLabel}</span>
-              <select
-                className="flex-1 text-xs py-1.5 px-2 rounded-md border border-slate-200 bg-white focus:border-blue-500 outline-none cursor-pointer hover:border-slate-300 transition-colors"
-                value={needTargetLangCode}
-                onChange={e => setNeedTargetLangCode(e.target.value)}
-              >
-                {LANGUAGE_OPTIONS.map(opt => (
-                  <option key={opt.value} value={opt.value}>
-                    {opt.label}
-                  </option>
-                ))}
-              </select>
-            </div>
+            </section>
 
-            {/* Result Area */}
-            {(needResult || needLoading) && (
-              <div className="relative group">
-                <div className={`w-full min-h-[100px] text-sm p-3 rounded-lg border ${needError ? 'border-red-200 bg-red-50' : 'border-slate-200 bg-white'} shadow-sm`}>
-                  {needLoading ? (
-                    <div className="space-y-2 animate-pulse">
-                      <div className="h-2 bg-slate-100 rounded w-3/4"></div>
-                      <div className="h-2 bg-slate-100 rounded w-1/2"></div>
-                    </div>
-                  ) : needError ? (
-                    <span className="text-red-600 text-xs">{needError}</span>
-                  ) : (
-                    <div className="prose prose-sm text-slate-700 leading-relaxed whitespace-pre-wrap">
-                      {needResult || t.popup.resultPlaceholder}
-                    </div>
+            <section className="popup-panel popup-panel--result popup-reveal popup-reveal--3">
+              <div className="popup-result-card">
+                <div className="popup-result-header">
+                  <div>
+                    <div className="popup-caption">{t.popup.tabTranslator}</div>
+                    <div className="popup-result-label">{activeTargetLanguage}</div>
+                  </div>
+
+                  {needResult && !needLoading && !needError && (
+                    <button
+                      type="button"
+                      onClick={handleNeedCopy}
+                      className={`popup-icon-button ${needCopied ? 'is-copied' : ''}`}
+                      title={t.popup.copyTitle}
+                    >
+                      {needCopied ? (
+                        <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                        </svg>
+                      ) : (
+                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                        </svg>
+                      )}
+                    </button>
                   )}
                 </div>
-                
-                {needResult && !needLoading && !needError && (
-                  <button
-                    type="button"
-                    onClick={handleNeedCopy}
-                    className="absolute top-2 right-2 p-1.5 rounded-md text-slate-400 hover:text-blue-600 hover:bg-blue-50 transition-colors opacity-0 group-hover:opacity-100 focus:opacity-100"
-                    title={t.popup.copyTitle}
-                  >
-                    {needCopied ? (
-                      <svg className="w-4 h-4 text-green-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                      </svg>
-                    ) : (
-                      <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                      </svg>
-                    )}
-                  </button>
+
+                {needLoading ? (
+                  <div className="popup-skeleton">
+                    <span />
+                    <span />
+                  </div>
+                ) : needError ? (
+                  <div className="popup-result-copy popup-error">{needError}</div>
+                ) : hasNeedOutput ? (
+                  <div className="popup-result-copy">{needResult}</div>
+                ) : (
+                  <div className="popup-empty-state">
+                    <span className="popup-empty-dot" aria-hidden="true" />
+                    {t.popup.resultPlaceholder}
+                  </div>
                 )}
               </div>
-            )}
+            </section>
           </div>
         ) : (
-          <div className="p-4 space-y-5">
-            {/* General Settings */}
-            <section className="space-y-3">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t.popup.preferencesTitle}</h2>
-              
-              <div className="bg-white rounded-lg border border-slate-200 shadow-sm divide-y divide-slate-100 overflow-hidden">
-                <div className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-slate-700">{t.popup.interfaceLanguage}</span>
-                    <span className="text-[10px] text-slate-400">{t.popup.interfaceLanguageDesc}</span>
+          <div className="popup-stack">
+            <section className="popup-section popup-reveal popup-reveal--2">
+              <h2 className="popup-section-title">{t.popup.preferencesTitle}</h2>
+
+              <div className="popup-card">
+                <div className="popup-setting-row">
+                  <div className="popup-setting-main">
+                    <span className="popup-setting-title">{t.popup.interfaceLanguage}</span>
+                    <span className="popup-setting-description">{t.popup.interfaceLanguageDesc}</span>
                   </div>
-                  <div className="flex bg-slate-100 rounded-lg p-0.5">
+                  <div className="popup-lang-switch">
                     <button
                       type="button"
                       onClick={() => setConfig({ ...config, interfaceLanguage: 'en' })}
-                      className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${
-                        config.interfaceLanguage === 'en'
-                          ? 'bg-white text-blue-600 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
+                      className="popup-lang-option"
+                      data-active={config.interfaceLanguage === 'en'}
                     >
                       EN
                     </button>
                     <button
                       type="button"
                       onClick={() => setConfig({ ...config, interfaceLanguage: 'zh' })}
-                      className={`px-2 py-0.5 text-xs font-medium rounded-md transition-all ${
-                        config.interfaceLanguage === 'zh'
-                          ? 'bg-white text-blue-600 shadow-sm'
-                          : 'text-slate-500 hover:text-slate-700'
-                      }`}
+                      className="popup-lang-option"
+                      data-active={config.interfaceLanguage === 'zh'}
                     >
                       中
                     </button>
                   </div>
                 </div>
 
-                <div className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-slate-700">{t.popup.floatingTransTitle}</span>
-                    <span className="text-[10px] text-slate-400">{t.popup.floatingTransDesc}</span>
+                <div className="popup-setting-row">
+                  <div className="popup-setting-main">
+                    <span className="popup-setting-title">{t.popup.floatingTransTitle}</span>
+                    <span className="popup-setting-description">{t.popup.floatingTransDesc}</span>
                   </div>
-                  <button
-                    type="button"
-                    onClick={handleToggleFloatingEnabled}
-                    className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${config.floatingEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
-                  >
-                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${config.floatingEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                  <button type="button" onClick={handleToggleFloatingEnabled} className="popup-toggle" data-on={config.floatingEnabled}>
+                    <span className="popup-toggle__thumb" />
                   </button>
                 </div>
 
-                <div className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-slate-700">{t.popup.hoverDelayTitle}</span>
-                    <span className="text-[10px] text-slate-400">{t.popup.hoverDelayDesc}</span>
+                <div className="popup-setting-row">
+                  <div className="popup-setting-main">
+                    <span className="popup-setting-title">{t.popup.floatingStreamTitle}</span>
+                    <span className="popup-setting-description">{t.popup.floatingStreamDesc}</span>
                   </div>
-                  <input
-                    type="number"
-                    min={200}
-                    max={5000}
-                    step={100}
-                    className="w-16 text-xs text-right p-1 rounded border border-slate-200 outline-none focus:border-blue-500"
-                    value={config.hoverDurationMs}
-                    disabled={!config.floatingEnabled}
-                    onChange={e => setConfig({ ...config, hoverDurationMs: Number(e.target.value) })}
-                  />
+                  <div className="flex items-center gap-3">
+                    <span className="popup-helper min-w-[42px] text-right">
+                      {config.floatingStreamEnabled ? t.popup.floatingModeStream : t.popup.floatingModeInstant}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleToggleFloatingStreamEnabled}
+                      className="popup-toggle"
+                      data-on={config.floatingStreamEnabled}
+                      disabled={!config.floatingEnabled}
+                    >
+                      <span className="popup-toggle__thumb" />
+                    </button>
+                  </div>
                 </div>
 
-                <div className="p-3 flex items-center justify-between hover:bg-slate-50 transition-colors">
-                  <div className="flex flex-col">
-                    <span className="text-sm font-medium text-slate-700">{t.popup.keepWarmTitle}</span>
-                    <span className="text-[10px] text-slate-400">{t.popup.keepWarmDesc}</span>
+                <div className="popup-setting-row">
+                  <div className="popup-setting-main">
+                    <span className="popup-setting-title">{t.popup.hoverDelayTitle}</span>
+                    <span className="popup-setting-description">{t.popup.hoverDelayDesc}</span>
+                  </div>
+                  <div className="popup-range-wrap">
+                    <input
+                      type="range"
+                      min={HOVER_DURATION_MIN_MS}
+                      max={HOVER_DURATION_MAX_MS}
+                      step={100}
+                      className="popup-range"
+                      value={config.hoverDurationMs}
+                      disabled={!config.floatingEnabled}
+                      onChange={e => setConfig({ ...config, hoverDurationMs: normalizeHoverDuration(Number(e.target.value)) })}
+                    />
+                    <div className="popup-range-row">
+                      <input
+                        type="number"
+                        min={HOVER_DURATION_MIN_MS}
+                        max={HOVER_DURATION_MAX_MS}
+                        step={100}
+                        className="popup-input !h-[38px] !w-[78px] !px-3 text-right disabled:opacity-50"
+                        value={config.hoverDurationMs}
+                        disabled={!config.floatingEnabled}
+                        onChange={e => setConfig({ ...config, hoverDurationMs: normalizeHoverDuration(Number(e.target.value)) })}
+                      />
+                      <span className="popup-range-unit">ms</span>
+                    </div>
+                  </div>
+                </div>
+
+                <div className="popup-setting-row">
+                  <div className="popup-setting-main">
+                    <span className="popup-setting-title">{t.popup.keepWarmTitle}</span>
+                    <span className="popup-setting-description">{t.popup.keepWarmDesc}</span>
                   </div>
                   <button
                     type="button"
                     onClick={() => setConfig({ ...config, keepAliveEnabled: !config.keepAliveEnabled })}
-                    className={`w-9 h-5 rounded-full p-0.5 transition-colors duration-200 ease-in-out focus:outline-none focus:ring-2 focus:ring-blue-500/20 ${config.keepAliveEnabled ? 'bg-blue-600' : 'bg-slate-300'}`}
+                    className="popup-toggle"
+                    data-on={config.keepAliveEnabled}
                   >
-                    <div className={`w-4 h-4 rounded-full bg-white shadow-sm transform transition-transform duration-200 ${config.keepAliveEnabled ? 'translate-x-4' : 'translate-x-0'}`} />
+                    <span className="popup-toggle__thumb" />
                   </button>
                 </div>
               </div>
             </section>
 
-            {/* API Configuration */}
-            <section className="space-y-3">
-              <h2 className="text-xs font-bold text-slate-400 uppercase tracking-wider">{t.popup.apiConfigTitle}</h2>
-              
-              <div className="bg-white rounded-lg border border-slate-200 shadow-sm p-3 space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">{t.popup.apiEndpoint}</label>
-                  <input 
-                    type="text" 
-                    className="w-full text-xs p-2 rounded border border-slate-200 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors"
-                    placeholder="http://localhost:1234/v1" 
-                    value={config.apiUrl}
-                    onChange={e => setConfig({ ...config, apiUrl: e.target.value })}
-                  />
-                </div>
+            <section className="popup-section popup-reveal popup-reveal--3">
+              <h2 className="popup-section-title">{t.popup.apiConfigTitle}</h2>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">{t.popup.apiKey}</label>
-                  <input 
-                    type="password" 
-                    className="w-full text-xs p-2 rounded border border-slate-200 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors"
-                    placeholder="sk-..." 
-                    value={config.apiKey}
-                    onChange={e => setConfig({ ...config, apiKey: e.target.value })}
-                  />
-                </div>
+              <div className="popup-provider-tabs">
+                {API_PROVIDER_TABS.map(provider => (
+                  <button
+                    key={provider}
+                    type="button"
+                    onClick={() => handleProviderTabChange(provider)}
+                    className="popup-provider-tab"
+                    data-active={config.activeApiProvider === provider}
+                  >
+                    {providerLabelMap[provider]}
+                  </button>
+                ))}
+              </div>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">{t.popup.modelName}</label>
-                  <input 
-                    type="text" 
-                    className="w-full text-xs p-2 rounded border border-slate-200 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors"
-                    placeholder="local-model" 
-                    value={config.modelName}
-                    onChange={e => setConfig({ ...config, modelName: e.target.value })}
-                  />
-                </div>
+              <div className="popup-card">
+                <div className="popup-form">
+                  <label className="popup-field">
+                    <span className="popup-field-label">{t.popup.apiEndpoint}</span>
+                    <input
+                      type="text"
+                      className="popup-input"
+                      placeholder="http://localhost:1234/v1"
+                      value={activeProviderConfig.apiUrl}
+                      onChange={e => updateActiveProviderConfig({ apiUrl: e.target.value })}
+                    />
+                  </label>
 
-                <div>
-                  <label className="block text-xs font-medium text-slate-600 mb-1">{t.popup.systemPrompt}</label>
-                  <textarea 
-                    className="w-full text-xs p-2 rounded border border-slate-200 outline-none focus:border-blue-500 bg-slate-50 focus:bg-white transition-colors resize-none h-16"
-                    value={config.prompt}
-                    onChange={e => setConfig({ ...config, prompt: e.target.value })}
-                  />
+                  <label className="popup-field">
+                    <span className="popup-field-label">{t.popup.apiKey}</span>
+                    <input
+                      type="password"
+                      className="popup-input"
+                      placeholder="sk-..."
+                      value={activeProviderConfig.apiKey}
+                      onChange={e => updateActiveProviderConfig({ apiKey: e.target.value })}
+                    />
+                  </label>
+
+                  <label className="popup-field">
+                    <span className="popup-field-label">{t.popup.modelName}</span>
+                    <input
+                      type="text"
+                      className="popup-input"
+                      placeholder="local-model"
+                      value={activeProviderConfig.modelName}
+                      onChange={e => updateActiveProviderConfig({ modelName: e.target.value })}
+                    />
+                  </label>
+
+                  <label className="popup-field">
+                    <span className="popup-field-label">{t.popup.systemPrompt}</span>
+                    <textarea
+                      className="popup-textarea min-h-[120px]"
+                      value={activeProviderConfig.prompt}
+                      onChange={e => updateActiveProviderConfig({ prompt: e.target.value })}
+                    />
+                  </label>
                 </div>
               </div>
             </section>
 
-            {/* Actions */}
-            <div className="flex gap-2 pt-2">
-              <button 
-                onClick={handleSave}
-                className="flex-1 bg-slate-800 text-white text-xs font-semibold py-2 rounded-md hover:bg-slate-900 transition-colors shadow-sm active:scale-[0.98]"
-              >
+            <div className="popup-actions popup-reveal popup-reveal--4">
+              <button onClick={handleSave} className="popup-action-primary flex-1">
                 {t.popup.saveButton}
               </button>
-              <button 
-                onClick={handlePreload}
-                disabled={loading}
-                className={`flex-1 text-xs font-semibold py-2 rounded-md transition-colors shadow-sm active:scale-[0.98] border ${loading ? 'bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed' : 'bg-white text-slate-700 border-slate-200 hover:bg-slate-50 hover:text-blue-600'}`}
-              >
+              <button onClick={handlePreload} disabled={loading} className="popup-action-secondary flex-1">
                 {loading ? t.popup.preloading : t.popup.preloadButton}
               </button>
             </div>
-            
-            <div className="text-center pt-2">
-               <button
-                  type="button"
-                  onClick={() => setConfig({ ...config, debug: !config.debug })}
-                  className={`text-[10px] ${config.debug ? 'text-blue-600 font-medium' : 'text-slate-400 hover:text-slate-600'}`}
-                >
-                  {t.popup.debugLogs}: {config.debug ? 'ON' : 'OFF'}
-                </button>
+
+            <div className="popup-debug-wrap popup-reveal popup-reveal--5">
+              <button
+                type="button"
+                onClick={() => setConfig({ ...config, debug: !config.debug })}
+                className="popup-debug"
+                data-active={config.debug}
+              >
+                {t.popup.debugLogs}: {config.debug ? 'ON' : 'OFF'}
+              </button>
             </div>
           </div>
         )}

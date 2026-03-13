@@ -1,8 +1,7 @@
-
 export const i18n = {
   en: {
     popup: {
-      title: 'AI Translate',
+      title: 'Floator',
       tabTranslator: 'Translator',
       tabSettings: 'Settings',
       inputPlaceholder: 'Enter text to translate...',
@@ -16,11 +15,18 @@ export const i18n = {
       preferencesTitle: 'Preferences',
       floatingTransTitle: 'Floating Translation',
       floatingTransDesc: 'Show popup on text selection',
+      floatingStreamTitle: 'Streaming Display',
+      floatingStreamDesc: 'Render floating translation progressively instead of waiting for the full result',
+      floatingModeInstant: 'Instant',
+      floatingModeStream: 'Stream',
       hoverDelayTitle: 'Hover Delay',
       hoverDelayDesc: 'Wait time before trigger (ms)',
       keepWarmTitle: 'Keep Model Warm',
       keepWarmDesc: 'Reduce first-request latency',
       apiConfigTitle: 'API Configuration',
+      providerLmStudio: 'LM Studio',
+      providerLmApiServer: 'LM API Server',
+      providerOllama: 'Ollama',
       apiEndpoint: 'API Endpoint',
       apiKey: 'API Key',
       modelName: 'Model Name',
@@ -50,11 +56,12 @@ export const i18n = {
       error: 'Translation failed. Please try again.',
       askTooltip: 'Ask AI about this translation',
       sourceLabel: 'SOURCE: ',
+      streaming: 'Streaming...',
     }
   },
   zh: {
     popup: {
-      title: 'AI 翻译',
+      title: '浮译',
       tabTranslator: '翻译',
       tabSettings: '设置',
       inputPlaceholder: '输入要翻译的文本...',
@@ -68,11 +75,18 @@ export const i18n = {
       preferencesTitle: '偏好设置',
       floatingTransTitle: '悬浮翻译',
       floatingTransDesc: '划词后自动显示翻译框',
+      floatingStreamTitle: '流式显示',
+      floatingStreamDesc: '开启后悬浮框会边生成边显示，关闭则等待完整结果后一次性出现',
+      floatingModeInstant: '一次性',
+      floatingModeStream: '流式',
       hoverDelayTitle: '悬停延迟',
       hoverDelayDesc: '触发前的等待时间 (毫秒)',
       keepWarmTitle: '模型保活',
       keepWarmDesc: '减少首次请求延迟',
       apiConfigTitle: 'API 配置',
+      providerLmStudio: 'LM Studio',
+      providerLmApiServer: 'LM API Server',
+      providerOllama: 'Ollama',
       apiEndpoint: 'API 地址',
       apiKey: 'API Key',
       modelName: '模型名称',
@@ -102,6 +116,7 @@ export const i18n = {
       error: '翻译失败，请重试。',
       askTooltip: '针对此翻译结果进行提问',
       sourceLabel: '原文：',
+      streaming: '流式输出中...',
     }
   }
 }
@@ -115,23 +130,41 @@ export const getTranslation = (lang: LanguageCode) => {
 export const getLanguageName = (langCode: string, interfaceLang: LanguageCode): string => {
   const map: Record<string, { en: string; zh: string }> = {
     'en': { en: 'English', zh: '英语' },
+    'english': { en: 'English', zh: '英语' },
     'zh': { en: 'Chinese', zh: '中文' },
+    'chinese': { en: 'Chinese', zh: '中文' },
     'zh-hans': { en: 'Chinese (Simplified)', zh: '简体中文' },
+    'simplified chinese': { en: 'Chinese (Simplified)', zh: '简体中文' },
     'zh-hant': { en: 'Chinese (Traditional)', zh: '繁体中文' },
+    'traditional chinese': { en: 'Chinese (Traditional)', zh: '繁体中文' },
     'fr': { en: 'French', zh: '法语' },
+    'french': { en: 'French', zh: '法语' },
     'de': { en: 'German', zh: '德语' },
+    'german': { en: 'German', zh: '德语' },
     'ja': { en: 'Japanese', zh: '日语' },
+    'japanese': { en: 'Japanese', zh: '日语' },
     'ko': { en: 'Korean', zh: '韩语' },
+    'korean': { en: 'Korean', zh: '韩语' },
     'ru': { en: 'Russian', zh: '俄语' },
+    'russian': { en: 'Russian', zh: '俄语' },
     'es': { en: 'Spanish', zh: '西班牙语' },
+    'spanish': { en: 'Spanish', zh: '西班牙语' },
     'pt': { en: 'Portuguese', zh: '葡萄牙语' },
+    'portuguese': { en: 'Portuguese', zh: '葡萄牙语' },
     'it': { en: 'Italian', zh: '意大利语' },
+    'italian': { en: 'Italian', zh: '意大利语' },
     'ar': { en: 'Arabic', zh: '阿拉伯语' },
+    'arabic': { en: 'Arabic', zh: '阿拉伯语' },
     'hi': { en: 'Hindi', zh: '印地语' },
+    'hindi': { en: 'Hindi', zh: '印地语' },
   }
-  
-  const normalized = langCode.toLowerCase().trim()
+
+  const normalized = String(langCode || '')
+    .toLowerCase()
+    .trim()
+    .replace(/[\[\]()]/g, '')
+
   const entry = map[normalized]
   if (entry) return entry[interfaceLang] || entry.en
-  return langCode // Fallback to raw code if not found
+  return langCode
 }

@@ -1,3 +1,949 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  :root {
+    --font-body: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
+    --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
+    --canvas: oklch(0.972 0.012 80);
+    --canvas-strong: oklch(0.946 0.022 72);
+    --surface: oklch(0.989 0.008 85 / 0.92);
+    --surface-strong: oklch(0.962 0.014 78 / 0.96);
+    --line: oklch(0.79 0.03 60 / 0.45);
+    --line-strong: oklch(0.58 0.08 34 / 0.18);
+    --ink: oklch(0.27 0.028 248);
+    --ink-soft: oklch(0.47 0.022 244);
+    --accent: oklch(0.67 0.156 31);
+    --accent-strong: oklch(0.53 0.149 28);
+    --accent-soft: oklch(0.93 0.04 36);
+    --accent-alt: oklch(0.62 0.11 236);
+    --accent-alt-strong: oklch(0.47 0.1 240);
+    --accent-alt-soft: oklch(0.93 0.03 240);
+    --success: oklch(0.56 0.122 156);
+    --success-soft: oklch(0.94 0.035 160);
+    --danger: oklch(0.59 0.19 24);
+    --danger-soft: oklch(0.95 0.04 24);
+    --shadow-lg: 0 22px 60px -30px color-mix(in oklab, var(--ink) 45%, transparent);
+    --shadow-md: 0 16px 36px -28px color-mix(in oklab, var(--ink) 35%, transparent);
+    --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+    color: var(--ink);
+    background:
+      radial-gradient(circle at top left, oklch(0.93 0.05 42 / 0.9), transparent 36%),
+      radial-gradient(circle at top right, oklch(0.95 0.032 220 / 0.7), transparent 30%),
+      linear-gradient(160deg, oklch(0.985 0.006 84), oklch(0.95 0.02 74));
+  }
+
+  html,
+  body,
+  #root {
+    min-height: 100%;
+  }
+
+  body {
+    margin: 0;
+    font-family: var(--font-body);
+    color: var(--ink);
+    background: transparent;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  button,
+  input,
+  select,
+  textarea {
+    font: inherit;
+  }
+
+  ::selection {
+    background: color-mix(in oklab, var(--accent) 22%, white);
+    color: var(--ink);
+  }
+}
+
+@layer components {
+  .popup-shell {
+    position: relative;
+    display: flex;
+    height: 540px;
+    min-height: 540px;
+    max-height: 540px;
+    width: 420px;
+    flex-direction: column;
+    overflow: hidden;
+    background:
+      radial-gradient(circle at top, color-mix(in oklab, var(--accent-soft) 70%, white) 0%, transparent 44%),
+      linear-gradient(180deg, color-mix(in oklab, var(--surface) 94%, white) 0%, var(--canvas-strong) 100%);
+    color: var(--ink);
+    isolation: isolate;
+    transition: filter 220ms var(--ease-out);
+  }
+
+  .popup-shell[data-tab='settings'] {
+    --accent: var(--accent-alt);
+    --accent-strong: var(--accent-alt-strong);
+    --accent-soft: var(--accent-alt-soft);
+  }
+
+  .popup-shell::before,
+  .popup-shell::after {
+    position: absolute;
+    inset: auto;
+    pointer-events: none;
+    content: "";
+  }
+
+  .popup-shell::before {
+    top: -88px;
+    right: -34px;
+    height: 200px;
+    width: 200px;
+    border-radius: 999px;
+    background: radial-gradient(circle, color-mix(in oklab, var(--accent) 26%, white) 0%, transparent 70%);
+    opacity: 0.9;
+  }
+
+  .popup-shell::after {
+    inset: 12px;
+    border: 1px solid color-mix(in oklab, var(--line) 72%, white);
+    border-radius: 22px;
+    opacity: 0.55;
+    z-index: -1;
+  }
+
+  .popup-topbar {
+    position: relative;
+    z-index: 3;
+    flex-shrink: 0;
+    padding-bottom: 10px;
+    background:
+      linear-gradient(180deg, color-mix(in oklab, var(--surface) 82%, white), color-mix(in oklab, var(--canvas-strong) 62%, transparent));
+    box-shadow:
+      0 18px 28px -30px color-mix(in oklab, var(--ink) 30%, transparent),
+      inset 0 -1px 0 color-mix(in oklab, var(--line) 52%, white);
+    backdrop-filter: blur(10px);
+  }
+
+  .popup-topbar::after {
+    content: "";
+    position: absolute;
+    left: 18px;
+    right: 18px;
+    bottom: 0;
+    height: 2px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--accent) 75%, white), color-mix(in oklab, var(--accent-strong) 75%, white), color-mix(in oklab, var(--accent) 75%, white));
+    background-size: 200% 100%;
+    opacity: 0;
+    transition: opacity 180ms var(--ease-out);
+  }
+
+  .popup-shell[data-loading='true'] .popup-topbar::after {
+    opacity: 0.9;
+    animation: popup-progress 1.3s linear infinite;
+  }
+
+  .popup-header {
+    display: flex;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 16px 18px 10px;
+  }
+
+  .popup-kicker {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--line) 85%, white);
+    background: color-mix(in oklab, var(--surface) 72%, white);
+    padding: 4px 10px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-soft);
+    box-shadow: var(--shadow-md);
+    width: fit-content;
+  }
+
+  .popup-kicker::before {
+    content: "";
+    width: 8px;
+    height: 8px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 76%, white), var(--accent-strong));
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent-soft) 55%, transparent);
+    animation: popup-dot 2.4s var(--ease-out) infinite;
+  }
+
+  .popup-title {
+    margin: 8px 0 2px;
+    font-family: var(--font-display);
+    font-size: clamp(1.58rem, 1.46rem + 0.7vw, 1.84rem);
+    line-height: 1.06;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--ink);
+  }
+
+  .popup-subtitle {
+    margin: 0;
+    max-width: 16rem;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--ink-soft);
+  }
+
+  .popup-header-side {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+  }
+
+  .popup-chip,
+  .popup-status {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 24px;
+    border-radius: 999px;
+    padding: 0 9px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    white-space: nowrap;
+  }
+
+  .popup-chip {
+    border: 1px solid color-mix(in oklab, var(--line) 82%, white);
+    background: color-mix(in oklab, var(--surface) 78%, white);
+    color: var(--ink-soft);
+  }
+
+  .popup-status {
+    max-width: 118px;
+    padding-inline: 10px;
+    letter-spacing: 0.02em;
+    text-transform: none;
+    font-size: 9px;
+  }
+
+  .popup-status[data-tone='success'] {
+    background: color-mix(in oklab, var(--success-soft) 86%, white);
+    color: var(--success);
+    border: 1px solid color-mix(in oklab, var(--success) 20%, white);
+  }
+
+  .popup-status[data-tone='error'] {
+    background: color-mix(in oklab, var(--danger-soft) 88%, white);
+    color: var(--danger);
+    border: 1px solid color-mix(in oklab, var(--danger) 18%, white);
+  }
+
+  .popup-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin: 0 18px;
+    padding: 6px;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--line) 80%, white);
+    background: color-mix(in oklab, var(--surface-strong) 80%, white);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 78%, transparent);
+  }
+
+  .popup-tab {
+    min-height: 34px;
+    border: 0;
+    border-radius: 999px;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    transition:
+      transform 180ms var(--ease-out),
+      background-color 180ms var(--ease-out),
+      color 180ms var(--ease-out),
+      box-shadow 180ms var(--ease-out);
+  }
+
+  .popup-tab:hover {
+    color: var(--ink);
+  }
+
+  .popup-tab:active {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  .popup-tab[data-active='true'] {
+    background:
+      radial-gradient(circle at top, color-mix(in oklab, var(--accent-soft) 74%, white), transparent 68%),
+      linear-gradient(180deg, color-mix(in oklab, var(--surface) 88%, white), color-mix(in oklab, var(--accent-soft) 42%, white));
+    color: var(--accent-strong);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, white 86%, transparent),
+      0 10px 18px -14px color-mix(in oklab, var(--accent) 44%, transparent);
+  }
+
+  .popup-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    padding: 12px 18px 18px;
+  }
+
+  .popup-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+  }
+
+  .popup-panel,
+  .popup-card {
+    position: relative;
+    overflow: hidden;
+    border: 1px solid color-mix(in oklab, var(--line) 78%, white);
+    border-radius: 20px;
+    background: linear-gradient(180deg, color-mix(in oklab, var(--surface) 90%, white), color-mix(in oklab, var(--surface-strong) 84%, white));
+    box-shadow: var(--shadow-md);
+  }
+
+  .popup-panel {
+    padding: 14px;
+  }
+
+  .popup-panel::before,
+  .popup-card::before {
+    position: absolute;
+    inset: 0;
+    content: "";
+    pointer-events: none;
+    background: linear-gradient(145deg, color-mix(in oklab, white 78%, transparent), transparent 44%);
+    opacity: 0.65;
+  }
+
+  .popup-panel--hero {
+    padding: 13px 13px 14px;
+    background:
+      radial-gradient(circle at top left, color-mix(in oklab, var(--accent-soft) 78%, white) 0%, transparent 44%),
+      radial-gradient(circle at 84% 12%, color-mix(in oklab, var(--accent-soft) 62%, white), transparent 36%),
+      linear-gradient(180deg, color-mix(in oklab, var(--surface) 96%, white), color-mix(in oklab, var(--canvas) 76%, white));
+  }
+
+  .popup-panel--result {
+    min-height: 194px;
+    background:
+      radial-gradient(circle at 12% 10%, color-mix(in oklab, var(--accent-soft) 38%, white), transparent 24%),
+      linear-gradient(180deg, color-mix(in oklab, var(--surface) 90%, white), color-mix(in oklab, var(--surface-strong) 84%, white));
+  }
+
+  .popup-caption {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: color-mix(in oklab, var(--ink-soft) 88%, white);
+  }
+
+  .popup-row,
+  .popup-result-header,
+  .popup-panel-actions {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .popup-row {
+    margin-bottom: 10px;
+  }
+
+  .popup-helper {
+    font-size: 10px;
+    color: var(--ink-soft);
+  }
+
+  .popup-select,
+  .popup-input,
+  .popup-textarea {
+    width: 100%;
+    border: 1px solid color-mix(in oklab, var(--line) 86%, white);
+    background: color-mix(in oklab, var(--surface) 80%, white);
+    color: var(--ink);
+    outline: none;
+    transition:
+      border-color 180ms var(--ease-out),
+      box-shadow 180ms var(--ease-out),
+      background-color 180ms var(--ease-out),
+      transform 180ms var(--ease-out);
+  }
+
+  .popup-select,
+  .popup-input {
+    min-height: 38px;
+    border-radius: 14px;
+    padding: 0 12px;
+    font-size: 12px;
+  }
+
+  .popup-textarea {
+    min-height: 126px;
+    resize: none;
+    border-radius: 16px;
+    padding: 13px 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 76%, transparent);
+  }
+
+  .popup-select:hover,
+  .popup-input:hover,
+  .popup-textarea:hover {
+    border-color: color-mix(in oklab, var(--accent) 36%, var(--line));
+  }
+
+  .popup-select:focus,
+  .popup-input:focus,
+  .popup-textarea:focus {
+    border-color: color-mix(in oklab, var(--accent) 62%, white);
+    box-shadow:
+      0 0 0 4px color-mix(in oklab, var(--accent-soft) 70%, transparent),
+      inset 0 1px 0 color-mix(in oklab, white 70%, transparent);
+    background: color-mix(in oklab, var(--surface) 92%, white);
+  }
+
+  .popup-textarea::placeholder,
+  .popup-input::placeholder {
+    color: color-mix(in oklab, var(--ink-soft) 70%, white);
+  }
+
+  .popup-action-primary,
+  .popup-action-secondary,
+  .popup-icon-button,
+  .popup-provider-tab,
+  .popup-lang-option,
+  .popup-toggle,
+  .popup-debug {
+    transition:
+      transform 180ms var(--ease-out),
+      border-color 180ms var(--ease-out),
+      background-color 180ms var(--ease-out),
+      color 180ms var(--ease-out),
+      box-shadow 180ms var(--ease-out);
+  }
+
+  .popup-action-primary,
+  .popup-action-secondary {
+    display: inline-flex;
+    min-height: 38px;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 0 14px;
+    font-size: 11px;
+    font-weight: 700;
+  }
+
+  .popup-action-primary {
+    background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 74%, white), var(--accent-strong));
+    color: color-mix(in oklab, white 92%, var(--ink));
+    box-shadow: 0 18px 30px -22px color-mix(in oklab, var(--accent) 55%, transparent);
+  }
+
+  .popup-action-primary:hover:not(:disabled),
+  .popup-action-secondary:hover:not(:disabled),
+  .popup-icon-button:hover:not(:disabled),
+  .popup-provider-tab:hover:not(:disabled),
+  .popup-lang-option:hover:not(:disabled),
+  .popup-debug:hover:not(:disabled) {
+    transform: translateY(-1px);
+  }
+
+  .popup-action-primary:active:not(:disabled),
+  .popup-action-secondary:active:not(:disabled) {
+    transform: translateY(1px) scale(0.99);
+  }
+
+  .popup-action-primary:hover:not(:disabled) {
+    box-shadow: 0 22px 34px -24px color-mix(in oklab, var(--accent) 62%, transparent);
+  }
+
+  .popup-action-secondary {
+    border-color: color-mix(in oklab, var(--line) 84%, white);
+    background: color-mix(in oklab, var(--surface) 80%, white);
+    color: var(--ink-soft);
+  }
+
+  .popup-action-secondary:hover:not(:disabled) {
+    border-color: color-mix(in oklab, var(--accent) 28%, var(--line));
+    color: var(--accent-strong);
+    background: color-mix(in oklab, var(--accent-soft) 40%, white);
+  }
+
+  .popup-action-primary:disabled,
+  .popup-action-secondary:disabled,
+  .popup-provider-tab:disabled {
+    cursor: not-allowed;
+    transform: none;
+    opacity: 0.55;
+    box-shadow: none;
+  }
+
+  .popup-result-card {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    min-height: 100%;
+  }
+
+  .popup-result-copy {
+    position: relative;
+    z-index: 1;
+    font-size: 12px;
+    line-height: 1.72;
+    color: var(--ink);
+    white-space: pre-wrap;
+  }
+
+  .popup-empty-state {
+    position: relative;
+    z-index: 1;
+    display: grid;
+    min-height: 126px;
+    place-items: center;
+    place-content: center;
+    gap: 8px;
+    padding: 12px 14px 10px;
+    font-size: 11px;
+    line-height: 1.6;
+    color: var(--ink-soft);
+    text-align: center;
+    text-wrap: balance;
+  }
+
+  .popup-empty-dot {
+    width: 7px;
+    height: 7px;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--accent) 70%, white);
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent-soft) 64%, transparent);
+    animation: popup-breathe 2.1s var(--ease-out) infinite;
+  }
+
+  .popup-result-label {
+    font-family: var(--font-display);
+    font-size: 1.25rem;
+    line-height: 1.1;
+    color: var(--ink);
+  }
+
+  .popup-icon-button {
+    display: inline-flex;
+    min-height: 33px;
+    min-width: 33px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    border: 1px solid color-mix(in oklab, var(--line) 82%, white);
+    background: color-mix(in oklab, var(--surface) 78%, white);
+    color: var(--ink-soft);
+    box-shadow: inset 0 1px 0 color-mix(in oklab, white 76%, transparent);
+  }
+
+  .popup-icon-button:hover:not(:disabled) {
+    color: var(--accent-strong);
+    border-color: color-mix(in oklab, var(--accent) 32%, var(--line));
+    background: color-mix(in oklab, var(--accent-soft) 44%, white);
+  }
+
+  .popup-icon-button.is-copied {
+    color: var(--success);
+    border-color: color-mix(in oklab, var(--success) 34%, white);
+    background: color-mix(in oklab, var(--success-soft) 72%, white);
+    animation: popup-pop 420ms var(--ease-out);
+  }
+
+  .popup-section {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .popup-section-title {
+    padding-inline: 2px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: color-mix(in oklab, var(--accent-strong) 52%, var(--ink-soft));
+  }
+
+  .popup-card {
+    padding: 8px;
+  }
+
+  .popup-setting-row {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    border-radius: 16px;
+    padding: 10px;
+  }
+
+  .popup-setting-row + .popup-setting-row {
+    border-top: 1px solid color-mix(in oklab, var(--line) 58%, white);
+  }
+
+  .popup-setting-main {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+  }
+
+  .popup-setting-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--ink);
+  }
+
+  .popup-setting-description {
+    font-size: 10px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+  }
+
+  .popup-lang-switch,
+  .popup-provider-tabs {
+    display: flex;
+    gap: 6px;
+    padding: 4px;
+    border-radius: 15px;
+    border: 1px solid color-mix(in oklab, var(--line) 82%, white);
+    background: color-mix(in oklab, var(--surface) 76%, white);
+  }
+
+  .popup-lang-option,
+  .popup-provider-tab {
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 10px;
+    font-weight: 700;
+  }
+
+  .popup-lang-option {
+    min-width: 42px;
+    min-height: 28px;
+    padding: 0 10px;
+  }
+
+  .popup-provider-tab {
+    flex: 1;
+    min-height: 30px;
+    padding: 0 9px;
+  }
+
+  .popup-lang-option[data-active='true'],
+  .popup-provider-tab[data-active='true'] {
+    background: linear-gradient(180deg, color-mix(in oklab, var(--surface) 90%, white), color-mix(in oklab, var(--accent-soft) 46%, white));
+    color: var(--accent-strong);
+    box-shadow:
+      inset 0 1px 0 color-mix(in oklab, white 86%, transparent),
+      0 10px 24px -22px color-mix(in oklab, var(--accent) 45%, transparent);
+  }
+
+  .popup-toggle {
+    display: inline-flex;
+    width: 44px;
+    min-width: 44px;
+    align-items: center;
+    border: 0;
+    border-radius: 999px;
+    padding: 3px;
+    background: color-mix(in oklab, var(--ink-soft) 26%, white);
+    box-shadow: inset 0 1px 2px color-mix(in oklab, var(--ink) 12%, transparent);
+  }
+
+  .popup-toggle[data-on='true'] {
+    background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 66%, white), var(--accent-strong));
+  }
+
+  .popup-toggle:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
+  }
+
+  .popup-toggle__thumb {
+    height: 16px;
+    width: 16px;
+    border-radius: 999px;
+    background: color-mix(in oklab, white 92%, var(--canvas));
+    box-shadow: 0 2px 8px -6px color-mix(in oklab, var(--ink) 42%, transparent);
+    transform: translateX(0);
+    transition: transform 180ms var(--ease-out);
+  }
+
+  .popup-toggle[data-on='true'] .popup-toggle__thumb {
+    transform: translateX(22px);
+  }
+
+  .popup-range-wrap {
+    display: flex;
+    min-width: 140px;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .popup-range {
+    width: 100%;
+    accent-color: var(--accent-strong);
+  }
+
+  .popup-range-row {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .popup-range-unit {
+    font-size: 10px;
+    color: var(--ink-soft);
+  }
+
+  .popup-form {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .popup-field {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .popup-field-label {
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--ink-soft);
+  }
+
+  .popup-actions {
+    display: flex;
+    gap: 8px;
+    padding-top: 2px;
+  }
+
+  .popup-debug-wrap {
+    display: flex;
+    justify-content: center;
+    padding-top: 0;
+  }
+
+  .popup-debug {
+    border: 0;
+    background: transparent;
+    color: var(--ink-soft);
+    font-size: 10px;
+    font-weight: 600;
+  }
+
+  .popup-reveal {
+    opacity: 0;
+    transform: translateY(8px);
+    animation: popup-rise 360ms var(--ease-out) forwards;
+  }
+
+  .popup-reveal--1 {
+    animation-delay: 20ms;
+  }
+
+  .popup-reveal--2 {
+    animation-delay: 80ms;
+  }
+
+  .popup-reveal--3 {
+    animation-delay: 140ms;
+  }
+
+  .popup-reveal--4 {
+    animation-delay: 190ms;
+  }
+
+  .popup-reveal--5 {
+    animation-delay: 230ms;
+  }
+
+  .popup-debug[data-active='true'] {
+    color: var(--accent-strong);
+  }
+
+  .popup-spinner {
+    width: 14px;
+    height: 14px;
+    border-radius: 999px;
+    border: 2px solid color-mix(in oklab, white 28%, transparent);
+    border-top-color: currentColor;
+    animation: popup-spin 900ms linear infinite;
+  }
+
+  .popup-skeleton {
+    display: grid;
+    gap: 10px;
+  }
+
+  .popup-skeleton span {
+    display: block;
+    height: 10px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, color-mix(in oklab, var(--surface-strong) 90%, white), color-mix(in oklab, var(--accent-soft) 55%, white), color-mix(in oklab, var(--surface-strong) 90%, white));
+    background-size: 200% 100%;
+    animation: popup-sheen 1.4s linear infinite;
+  }
+
+  .popup-skeleton span:last-child {
+    width: 68%;
+  }
+
+  .popup-error {
+    color: var(--danger);
+  }
+
+  .popup-scroll::-webkit-scrollbar {
+    width: 10px;
+  }
+
+  .popup-scroll::-webkit-scrollbar-thumb {
+    border: 3px solid transparent;
+    border-radius: 999px;
+    background: color-mix(in oklab, var(--line) 76%, transparent);
+    background-clip: padding-box;
+  }
+
+  .popup-scroll::-webkit-scrollbar-track {
+    background: transparent;
+  }
+}
+
+@keyframes popup-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes popup-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes popup-dot {
+  0%,
+  100% {
+    box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent-soft) 55%, transparent);
+  }
+
+  50% {
+    box-shadow: 0 0 0 6px color-mix(in oklab, var(--accent-soft) 62%, transparent);
+  }
+}
+
+@keyframes popup-breathe {
+  0%,
+  100% {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+
+  50% {
+    transform: scale(1.14);
+    opacity: 1;
+  }
+}
+
+@keyframes popup-pop {
+  from {
+    transform: scale(0.86);
+  }
+
+  to {
+    transform: scale(1);
+  }
+}
+
+@keyframes popup-progress {
+  from {
+    background-position: 200% 0;
+  }
+
+  to {
+    background-position: -200% 0;
+  }
+}
+
+@keyframes popup-sheen {
+  0% {
+    background-position: 200% 0;
+  }
+
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .popup-tab,
+  .popup-select,
+  .popup-input,
+  .popup-textarea,
+  .popup-action-primary,
+  .popup-action-secondary,
+  .popup-icon-button,
+  .popup-provider-tab,
+  .popup-lang-option,
+  .popup-toggle,
+  .popup-toggle__thumb,
+  .popup-debug,
+  .popup-reveal,
+  .popup-topbar::after,
+  .popup-empty-dot {
+    transition: none;
+    animation: none;
+  }
+
+  .popup-reveal {
+    opacity: 1;
+    transform: none;
+  }
+
+  .popup-spinner,
+  .popup-skeleton span,
+  .popup-kicker::before {
+    animation: none;
+  }
+}

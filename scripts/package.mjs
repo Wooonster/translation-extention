@@ -15,7 +15,7 @@ if (!fs.existsSync(distDir)) {
 
 const pkg = JSON.parse(fs.readFileSync(path.join(projectRoot, 'package.json'), 'utf8'))
 const version = pkg.version
-const outName = `ai-translate-assistant-${version}.zip`
+const outName = `floator-${version}.zip`
 const outPath = path.join(projectRoot, outName)
 
 if (fs.existsSync(outPath)) fs.rmSync(outPath)

@@ -1,0 +1,8 @@
+{
+  "extName": {
+    "message": "浮译"
+  },
+  "extDescription": {
+    "message": "基于本地 LLM 或 OpenAI 兼容接口的悬浮翻译扩展"
+  }
+}

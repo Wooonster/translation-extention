@@ -7,7 +7,7 @@ import { getConfig } from '../../lib/config'
 interface FloatingBoxProps {
   position: { top: number; left: number }
   selectionKey?: string
-  status: 'idle' | 'counting' | 'loading' | 'success' | 'error'
+  status: 'idle' | 'counting' | 'loading' | 'streaming' | 'success' | 'error'
   sourceText?: string
   sourceLang?: string
   result?: string
@@ -33,6 +33,7 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
   const [followupError, setFollowupError] = useState('')
   const [currentPage, setCurrentPage] = useState(0)
   const swipeStartXRef = useRef<number | null>(null)
+  const composingRef = useRef(false)
   const [lang, setLang] = useState<LanguageCode>('en')
   const followupListRef = useRef<HTMLDivElement | null>(null)
 
@@ -41,6 +42,12 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
   }, [])
 
   const t = getTranslation(lang)
+  const normalizedSourceLang = String(sourceLang ?? '').trim()
+  const sourceLangDisplay = normalizedSourceLang
+    ? getLanguageName(normalizedSourceLang, lang)
+    : lang === 'zh'
+      ? '自动检测'
+      : 'Auto detected'
 
   useEffect(() => {
     setPos(basePosition)
@@ -200,49 +207,47 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
   return (
     <div 
       ref={boxRef}
-      className={[
-        'fixed bg-white shadow-lg rounded-lg border border-gray-200 text-sm text-gray-800 ai-translate-box',
-        isDragging ? 'transition-none' : 'transition-all duration-200',
-      ].join(' ')}
+      className={['fixed text-sm ai-translate-box', isDragging ? 'transition-none' : 'transition-all duration-200'].join(' ')}
       style={{ top: pos.top, left: pos.left, zIndex: 2147483647 }}
     >
       {/* Counting State: Minimal indicator */}
       {status === 'counting' && (
-        <div className="p-2 flex items-center gap-2 cursor-move select-none" onPointerDown={startDrag}>
-           <div className="w-4 h-4 rounded-full border-2 border-blue-500 border-t-transparent animate-spin" />
-           <span className="text-xs text-gray-500">{t.floating.translating} {Math.max(0, Math.ceil((100 - progress) * 0.03))}{t.floating.seconds}</span>
+        <div className="ai-translate-compact ai-translate-mini" onPointerDown={startDrag}>
+          <div className="ai-translate-spinner" />
+          <span className="ai-translate-mini-label">
+            {t.floating.translating} <span className="ai-translate-mini-count">{Math.max(0, Math.ceil((100 - progress) * 0.03))}</span>
+            {t.floating.seconds}
+          </span>
         </div>
       )}
 
       {/* Loading State */}
       {status === 'loading' && (
-        <div className="p-3 w-64 cursor-move select-none" onPointerDown={startDrag}>
-          <div className="animate-pulse flex space-x-4">
-            <div className="flex-1 space-y-2 py-1">
-              <div className="h-4 bg-gray-200 rounded w-3/4"></div>
-              <div className="h-4 bg-gray-200 rounded"></div>
-            </div>
+        <div className="ai-translate-loading cursor-move select-none" onPointerDown={startDrag}>
+          <div className="ai-translate-skeleton">
+            <span className="ai-translate-skeleton-line" />
+            <span className="ai-translate-skeleton-line" />
           </div>
         </div>
       )}
 
       {/* Success State */}
-      {status === 'success' && (
-        <div className="relative w-96 flex flex-col font-sans">
+      {(status === 'success' || status === 'streaming') && (
+        <div className="ai-translate-frame flex flex-col">
           {/* Header */}
           <div 
-            className="flex justify-between items-center px-4 py-3 border-b border-slate-100 cursor-move select-none bg-white rounded-t-xl" 
+            className="ai-translate-header cursor-move select-none" 
             onPointerDown={startDrag}
           >
-            <div className="flex items-center gap-2">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-500"></span>
-              <h3 className="font-bold text-slate-800 text-xs tracking-wide">
+            <div className="ai-translate-header-title">
+              <span className="ai-translate-seal"></span>
+              <h3 className="ai-translate-eyebrow">
                 {currentPage === 0 ? t.floating.titleTrans : t.floating.titleFollowup}
               </h3>
             </div>
             <button 
               onClick={onClose} 
-              className="text-slate-400 hover:text-slate-600 p-1 rounded-full hover:bg-slate-100 transition-colors" 
+              className="ai-translate-icon" 
               data-no-drag="true"
             >
               <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -253,75 +258,88 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
 
           {/* Content Area */}
           <div
-            className="relative overflow-hidden bg-white group"
+            className="group relative overflow-hidden bg-transparent"
             onPointerDown={startSwipe}
             onPointerUp={endSwipe}
             data-no-drag="true"
           >
             <div
-              className="flex transition-transform duration-300 ease-out"
+              className="ai-translate-pages"
               style={{ transform: `translateX(-${currentPage * 100}%)` }}
             >
               {/* Page 1: Translation */}
-              <div className="w-full shrink-0 max-h-64 overflow-y-auto px-5 py-4 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent">
-                {sourceLang && (
-                  <div className="text-[10px] font-medium text-slate-400 mb-2 uppercase tracking-wide">
-                    {t.floating.sourceLabel}{getLanguageName(sourceLang, lang)}
+              <div className="ai-translate-scroll shrink-0">
+                <div className="ai-translate-overline">
+                  {t.floating.sourceLabel}{sourceLangDisplay}
+                </div>
+                {status === 'streaming' && (
+                  <div className="ai-translate-pill">
+                    <span className="ai-translate-pill-dot animate-pulse"></span>
+                    {t.floating.streaming}
                   </div>
                 )}
-                <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px] max-w-none prose-p:my-1 prose-headings:text-slate-800 prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-slate-100 prose-code:px-1 prose-code:rounded prose-code:text-slate-800 prose-pre:bg-slate-50 prose-pre:p-2 prose-pre:rounded-lg">
-                  <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {result || ''}
-                  </ReactMarkdown>
+                <div className="ai-translate-markdown prose prose-sm max-w-none">
+                  {result ? (
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      {result}
+                    </ReactMarkdown>
+                  ) : (
+                    <div className="ai-translate-thinking">
+                      <span className="ai-translate-thinking-dot animate-pulse"></span>
+                      <span>{t.floating.thinking}</span>
+                    </div>
+                  )}
                 </div>
               </div>
 
               {/* Page 2: Follow-up */}
               <div 
                 ref={followupListRef}
-                className="w-full shrink-0 max-h-64 overflow-y-auto px-5 py-4 scrollbar-thin scrollbar-thumb-slate-200 scrollbar-track-transparent"
+                className="ai-translate-scroll shrink-0"
               >
-                {followupHistory.map((item, index) => (
-                  <div key={index} className="mb-6 last:mb-0">
-                    <div className="flex items-start gap-2 mb-2">
-                      <div className="w-5 h-5 rounded-full bg-slate-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-slate-500" viewBox="0 0 20 20" fill="currentColor">
-                          <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
-                        </svg>
+                <div className="ai-translate-thread">
+                  {followupHistory.map((item, index) => (
+                    <div key={index} className="ai-translate-thread-item">
+                      <div className="ai-translate-message">
+                        <div className="ai-translate-avatar ai-translate-avatar--user">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                            <path fillRule="evenodd" d="M10 9a3 3 0 100-6 3 3 0 000 6zm-7 9a7 7 0 1114 0H3z" clipRule="evenodd" />
+                          </svg>
+                        </div>
+                        <div className="ai-translate-bubble ai-translate-bubble--user">{item.query}</div>
                       </div>
-                      <div className="text-xs font-medium text-slate-700 bg-slate-50 px-3 py-2 rounded-lg rounded-tl-none">
-                        {item.query}
+                      <div className="ai-translate-message group/item">
+                        <div className="ai-translate-avatar ai-translate-avatar--assistant">
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
+                            <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
+                            <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
+                          </svg>
+                        </div>
+                        <div className="ai-translate-bubble ai-translate-bubble--assistant">
+                          <div className="ai-translate-markdown prose prose-sm max-w-none">
+                            <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                              {item.answer || ''}
+                            </ReactMarkdown>
+                          </div>
+                        </div>
+                        <button
+                          onClick={() => copyResult(item.answer)}
+                          className="ai-translate-icon ai-translate-copy-answer self-start"
+                          title={t.floating.copy}
+                        >
+                          <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
+                          </svg>
+                        </button>
                       </div>
                     </div>
-                    <div className="flex items-start gap-2 group/item">
-                      <div className="w-5 h-5 rounded-full bg-blue-100 flex items-center justify-center shrink-0 mt-0.5">
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3 text-blue-600" viewBox="0 0 20 20" fill="currentColor">
-                          <path d="M2 10a8 8 0 018-8v8h8a8 8 0 11-16 0z" />
-                          <path d="M12 2.252A8.014 8.014 0 0117.748 8H12V2.252z" />
-                        </svg>
-                      </div>
-                      <div className="prose prose-sm prose-slate text-slate-700 leading-relaxed text-[13px] flex-1 max-w-none prose-p:my-1 prose-headings:text-slate-800 prose-headings:font-semibold prose-a:text-blue-600 prose-code:bg-slate-100 prose-code:px-1 prose-code:rounded prose-code:text-slate-800 prose-pre:bg-slate-50 prose-pre:p-2 prose-pre:rounded-lg">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                          {item.answer || ''}
-                        </ReactMarkdown>
-                      </div>
-                      <button
-                        onClick={() => copyResult(item.answer)}
-                        className="p-1 rounded text-slate-300 hover:text-blue-500 hover:bg-slate-100 opacity-0 group-hover/item:opacity-100 transition-all shrink-0 self-start"
-                        title={t.floating.copy}
-                      >
-                        <svg xmlns="http://www.w3.org/2000/svg" className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
                 {followupLoading && (
-                  <div className="flex items-center gap-2 mt-4 ml-7">
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }}></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }}></span>
-                    <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }}></span>
+                  <div className="ai-translate-thinking mt-4 ml-9">
+                    <span className="ai-translate-thinking-dot animate-bounce" style={{ animationDelay: '0ms' }}></span>
+                    <span className="ai-translate-thinking-dot animate-bounce" style={{ animationDelay: '150ms' }}></span>
+                    <span className="ai-translate-thinking-dot animate-bounce" style={{ animationDelay: '300ms' }}></span>
                   </div>
                 )}
               </div>
@@ -333,7 +351,7 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                 <button
                   type="button"
                   onClick={() => setCurrentPage(0)}
-                  className={`absolute left-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all opacity-0 group-hover:opacity-100 ${currentPage === 0 ? 'invisible' : ''}`}
+                  className={`ai-translate-nav absolute left-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 ${currentPage === 0 ? 'invisible' : ''}`}
                   data-no-drag="true"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -343,7 +361,7 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                 <button
                   type="button"
                   onClick={() => setCurrentPage(1)}
-                  className={`absolute right-2 top-1/2 -translate-y-1/2 p-1.5 rounded-full bg-white/80 backdrop-blur-sm border border-slate-200 shadow-sm text-slate-400 hover:text-blue-600 hover:border-blue-200 transition-all opacity-0 group-hover:opacity-100 ${currentPage === 1 ? 'invisible' : ''}`}
+                  className={`ai-translate-nav absolute right-2 top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 ${currentPage === 1 ? 'invisible' : ''}`}
                   data-no-drag="true"
                 >
                   <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" viewBox="0 0 20 20" fill="currentColor">
@@ -355,24 +373,25 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
           </div>
 
           {/* Action Bar */}
-          <div className="px-4 py-3 bg-slate-50 border-t border-slate-100 rounded-b-xl flex flex-col gap-3" data-no-drag="true">
+          <div className="ai-translate-footer" data-no-drag="true">
             {!followupInputOpen ? (
-              <div className="flex items-center justify-between">
+              <div className="ai-translate-footer-row">
                 {/* Pagination Dots */}
-                <div className="flex items-center gap-1.5">
+                <div className="ai-translate-dots">
                   {canFlip && (
                     <>
-                      <div className={`h-1.5 rounded-full transition-all duration-300 ${currentPage === 0 ? 'w-4 bg-blue-500' : 'w-1.5 bg-slate-300'}`} />
-                      <div className={`h-1.5 rounded-full transition-all duration-300 ${currentPage === 1 ? 'w-4 bg-blue-500' : 'w-1.5 bg-slate-300'}`} />
+                      <div className="ai-translate-dot" data-active={currentPage === 0} />
+                      <div className="ai-translate-dot" data-active={currentPage === 1} />
                     </>
                   )}
                 </div>
 
-                <div className="flex items-center gap-2">
+                <div className="ai-translate-footer-actions">
                   <button
                     type="button"
                     onClick={() => setFollowupInputOpen(true)}
-                    className="flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium text-slate-600 hover:text-blue-600 hover:bg-white hover:shadow-sm border border-transparent hover:border-slate-200 transition-all"
+                    disabled={status === 'streaming'}
+                    className="ai-translate-action"
                     title={t.floating.askTooltip}
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
@@ -381,16 +400,13 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                     <span>{t.floating.askAI}</span>
                   </button>
                   
-                  <div className="w-px h-4 bg-slate-200 mx-1"></div>
+                  <div className="ai-translate-divider"></div>
 
                   <button
                     type="button"
                     onClick={() => copyResult(result)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-xs font-medium transition-all border ${
-                      copied
-                        ? 'text-emerald-600 bg-emerald-50 border-emerald-200'
-                        : 'text-slate-600 hover:text-blue-600 hover:bg-white hover:shadow-sm border-transparent hover:border-slate-200'
-                    }`}
+                    disabled={status === 'streaming' && !result}
+                    className={copied ? 'ai-translate-primary' : 'ai-translate-action'}
                   >
                     {copied ? (
                       <>
@@ -407,30 +423,39 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                         <span>{t.floating.copy}</span>
                       </>
                     )}
-                  </button>
+                      </button>
                 </div>
               </div>
             ) : (
               <div className="animate-in fade-in slide-in-from-bottom-2 duration-200">
                 <div className="relative">
                   <textarea
-                    className="w-full text-[13px] leading-relaxed border border-slate-200 rounded-lg p-3 bg-white outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 resize-none shadow-sm placeholder:text-slate-400"
+                    className="ai-translate-input"
                     rows={2}
                     placeholder={t.floating.followupPlaceholder}
                     value={followupQuery}
                     onChange={e => setFollowupQuery(e.target.value)}
+                    onCompositionStart={() => {
+                      composingRef.current = true
+                    }}
+                    onCompositionEnd={() => {
+                      composingRef.current = false
+                    }}
                     onKeyDown={e => {
+                      const native = e.nativeEvent as KeyboardEvent
+                      const isComposing = composingRef.current || native.isComposing || native.keyCode === 229
                       if (e.key === 'Enter' && !e.shiftKey) {
+                        if (isComposing) return
                         e.preventDefault()
                         submitFollowup()
                       }
-                      if (e.key === 'Escape') setFollowupInputOpen(false)
+                      if (e.key === 'Escape' && !isComposing) setFollowupInputOpen(false)
                     }}
                     autoFocus
                   />
                   <button 
                     onClick={() => setFollowupInputOpen(false)}
-                    className="absolute right-2 top-2 p-1 text-slate-300 hover:text-slate-500 rounded-full hover:bg-slate-100 transition-colors"
+                    className="ai-translate-icon absolute right-2 top-2"
                   >
                     <svg xmlns="http://www.w3.org/2000/svg" className="h-3 w-3" viewBox="0 0 20 20" fill="currentColor">
                       <path fillRule="evenodd" d="M4.293 4.293a1 1 0 011.414 0L10 8.586l4.293-4.293a1 1 0 111.414 1.414L11.414 10l4.293 4.293a1 1 0 01-1.414 1.414L10 11.414l-4.293 4.293a1 1 0 01-1.414-1.414L8.586 10 4.293 5.707a1 1 0 010-1.414z" clipRule="evenodd" />
@@ -438,15 +463,15 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                   </button>
                 </div>
                 
-                <div className="mt-2 flex items-center justify-between">
-                  <span className="text-[10px] font-medium text-slate-400">
+                <div className="mt-3 flex items-center justify-between gap-3">
+                  <span className={`ai-translate-meta ${followupError ? 'ai-translate-meta--error' : ''}`}>
                     {followupLoading ? (
-                      <span className="flex items-center gap-1.5 text-blue-600">
-                        <span className="w-1.5 h-1.5 rounded-full bg-blue-600 animate-pulse"></span>
+                      <span className="inline-flex items-center gap-1.5 text-[inherit]">
+                        <span className="ai-translate-thinking-dot animate-pulse"></span>
                         {t.floating.thinking}
                       </span>
                     ) : followupError ? (
-                      <span className="text-red-500">{followupError}</span>
+                      <span>{followupError}</span>
                     ) : (
                       t.floating.pressEnter
                     )}
@@ -455,7 +480,7 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                     type="button"
                     onClick={submitFollowup}
                     disabled={followupLoading || !followupQuery.trim()}
-                    className="px-3 py-1.5 text-xs font-semibold rounded-md bg-blue-600 text-white hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed transition-colors shadow-sm"
+                    className="ai-translate-primary"
                   >
                     {t.floating.send}
                   </button>
@@ -468,8 +493,8 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
 
       {/* Error State */}
       {status === 'error' && (
-        <div className="p-3 w-64 bg-red-50 border-red-100 rounded-lg cursor-move select-none" onPointerDown={startDrag}>
-          <p className="text-red-600">{t.floating.error}</p>
+        <div className="ai-translate-error" onPointerDown={startDrag}>
+          <p>{result || t.floating.error}</p>
         </div>
       )}
     </div>

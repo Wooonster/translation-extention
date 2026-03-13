@@ -16,6 +16,62 @@ export interface SelectionInfo {
   boundingRect: Rect
 }
 
+const toRect = (rect: DOMRect): Rect => ({
+  top: rect.top,
+  left: rect.left,
+  right: rect.right,
+  bottom: rect.bottom,
+})
+
+const getDeepActiveElement = (): Element | null => {
+  let active: Element | null = document.activeElement
+  while (active instanceof HTMLElement && active.shadowRoot?.activeElement) {
+    active = active.shadowRoot.activeElement
+  }
+  return active
+}
+
+const getInputSelectionInfo = (): SelectionInfo | null => {
+  const active = getDeepActiveElement()
+  if (!(active instanceof HTMLInputElement || active instanceof HTMLTextAreaElement)) return null
+  if (active instanceof HTMLInputElement && active.type === 'password') return null
+
+  const start = active.selectionStart
+  const end = active.selectionEnd
+  if (start == null || end == null || start === end) return null
+
+  const value = active.value ?? ''
+  const selectedText = value.slice(start, end)
+  if (!selectedText.trim()) return null
+
+  // Input/Textarea does not expose per-range client rects, so fall back to control bounds.
+  const rect = active.getBoundingClientRect()
+  if (rect.width === 0 || rect.height === 0) return null
+
+  return {
+    text: selectedText,
+    rects: [toRect(rect)],
+    boundingRect: toRect(rect),
+  }
+}
+
+const getWindowSelectionInfo = (): SelectionInfo | null => {
+  const sel = window.getSelection()
+  if (!sel || sel.isCollapsed || !sel.toString().trim()) return null
+
+  const range = sel.getRangeAt(0)
+  const boundingRect = range.getBoundingClientRect()
+  if (boundingRect.width === 0 || boundingRect.height === 0) return null
+
+  const clientRects = Array.from(range.getClientRects()).map(toRect)
+
+  return {
+    text: sel.toString(),
+    rects: clientRects,
+    boundingRect: toRect(boundingRect),
+  }
+}
+
 export const useSelectionHover = (onTrigger: (text: string, selection: SelectionInfo) => void, hoverDuration = 3000, enabled = true) => {
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
   const [isHovering, setIsHovering] = useState(false)
@@ -81,8 +137,8 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
     if (!enabled) return
 
     const handleSelectionChange = () => {
-      const sel = window.getSelection()
-      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+      const nextSelection = getInputSelectionInfo() ?? getWindowSelectionInfo()
+      if (!nextSelection) {
         setSelection(null)
         selectionRef.current = null
         setIsHovering(false)
@@ -91,7 +147,8 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
         resetHoverState()
         return
       }
-      const selectedText = sel.toString()
+
+      const selectedText = nextSelection.text
       if (shouldSkipSelection(selectedText)) {
         setSelection(null)
         selectionRef.current = null
@@ -103,26 +160,7 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
         return
       }
 
-      const range = sel.getRangeAt(0)
-      const boundingRect = range.getBoundingClientRect()
-      // Convert DOMRectList to simple Rect objects to ensure state persistence
-      const clientRects = Array.from(range.getClientRects()).map(r => ({
-        top: r.top, left: r.left, right: r.right, bottom: r.bottom
-      }))
-      
-      // Ignore zero-width rects (invisible)
-      if (boundingRect.width === 0 || boundingRect.height === 0) return
-
-      const newSelection = {
-        text: selectedText,
-        rects: clientRects,
-        boundingRect: {
-          top: boundingRect.top,
-          left: boundingRect.left,
-          right: boundingRect.right,
-          bottom: boundingRect.bottom
-        },
-      }
+      const newSelection = nextSelection
       setSelection(newSelection)
       selectionRef.current = newSelection
       resetHoverState()
@@ -142,16 +180,27 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
     }
 
     // Use mouseup for stable selection end, selectionchange fires too often during drag
+    let selectionChangeRaf: number | null = null
     const handleMouseUp = (e: MouseEvent) => {
       lastMousePosRef.current = { x: e.clientX, y: e.clientY }
       handleSelectionChange()
     }
-    document.addEventListener('mouseup', handleMouseUp)
-    document.addEventListener('keyup', handleSelectionChange) // Shift+Arrow selection
+    const handleSelectionChangeEvent = () => {
+      if (selectionChangeRaf != null) cancelAnimationFrame(selectionChangeRaf)
+      selectionChangeRaf = requestAnimationFrame(() => {
+        selectionChangeRaf = null
+        handleSelectionChange()
+      })
+    }
+    document.addEventListener('mouseup', handleMouseUp, true)
+    document.addEventListener('keyup', handleSelectionChange, true) // Shift+Arrow selection
+    document.addEventListener('selectionchange', handleSelectionChangeEvent)
 
     return () => {
-      document.removeEventListener('mouseup', handleMouseUp)
-      document.removeEventListener('keyup', handleSelectionChange)
+      document.removeEventListener('mouseup', handleMouseUp, true)
+      document.removeEventListener('keyup', handleSelectionChange, true)
+      document.removeEventListener('selectionchange', handleSelectionChangeEvent)
+      if (selectionChangeRaf != null) cancelAnimationFrame(selectionChangeRaf)
     }
   }, [enabled])
 

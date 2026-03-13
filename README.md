@@ -1,4 +1,15 @@
-# AI Translate Assistant（Chrome Extension）
+# 浮译/Floator（Chrome Extension）
+
+## 更新日志 (v1.1.0)
+- **品牌升级**：
+  - 插件名称按语言显示：中文为 `浮译`，英文为 `Floator`。
+  - 全新插件图标（16/48/128）与视觉风格同步上线。
+- **UI/UX 优化**：
+  - Popup 与悬浮翻译框整体重绘，布局更紧凑、阅读层级更清晰。
+  - 翻页按钮交互优化：不再出现悬停“下坠”导致难点的问题。
+- **交互与稳定性修复**：
+  - 追问输入框修复中文输入法（IME）场景下 `Enter` 误发送问题。
+  - 源语言行改为始终可见，未识别时显示自动检测状态。
 
 ## 更新日志 (v1.0.4)
 - **Markdown 支持**：
@@ -55,6 +66,8 @@ npm run build
 ### 1) 配置 API（Popup → API Configuration）
 - API Endpoint：
   - LM Studio 示例：`http://127.0.0.1:1234/v1`
+  - OpenRouter 示例：`https://openrouter.ai/api/v1`
+  - 智谱 BigModel 示例：`https://open.bigmodel.cn/api/paas/v4`
   - 也可填根地址（例如 `http://127.0.0.1:1234`），扩展会自动补全到 Chat Completions 路径（见下文）
 - API Key：
   - 若后端不校验可填任意字符串；若后端需要鉴权则填写真实 Key
@@ -79,16 +92,20 @@ npm run build
 - Keep Model Warm：开启后按间隔自动发送预热请求（可设置 15–3600 秒）
 - Debug Logs：开启后在扩展相关上下文输出调试日志
 
+### OpenRouter 推荐（免费优先）
+- 首选模型：`openrouter/free`（由 OpenRouter 自动路由到可用免费模型，稳定兜底）
+- 可选增强：`qwen/qwen3-30b-a3b:free`（节点可用时，多语言与对话能力更均衡）
+
 ## 接口说明（OpenAI-compatible Chat Completions）
 扩展使用 `POST {apiUrl}/chat/completions`（并在需要时自动补齐 `/v1`），请求体为标准 Chat Completions 结构：
 - `model`
 - `messages`
-- `temperature/top_p/top_k`（部分后端可能忽略其中的部分字段）
+- `temperature/top_p`
 
 ### Endpoint 自动补全规则
 当你在 Popup 中填写 `API Endpoint` 时，扩展会尽量容错拼接：
 - 以 `/chat/completions` 结尾：直接使用
-- 以 `/v1` 结尾：追加 `/chat/completions`
+- 以 `/v{数字}` 结尾（如 `/v1`、`/v4`）：追加 `/chat/completions`
 - 否则：追加 `/v1/chat/completions`
 
 ## TranslateGemma 说明
@@ -111,4 +128,4 @@ npm run build
 npm run release
 ```
 
-输出文件：`ai-translate-assistant-<version>.zip`
+输出文件：`floator-<version>.zip`

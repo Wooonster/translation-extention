@@ -1,0 +1,8 @@
+{
+  "extName": {
+    "message": "Floator"
+  },
+  "extDescription": {
+    "message": "Floating translation powered by local LLM or OpenAI-compatible APIs"
+  }
+}
