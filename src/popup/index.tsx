@@ -26,7 +26,25 @@ const LANGUAGE_OPTIONS: Array<{ label: string; value: string }> = [
   { label: 'Português | 葡萄牙语', value: 'pt' },
 ]
 
-const API_PROVIDER_TABS: ApiProvider[] = ['lmStudio', 'lmApiServer', 'ollama']
+const API_PROVIDER_TABS: ApiProvider[] = ['lmApiServer', 'lmStudio', 'ollama']
+
+const API_PROVIDER_PLACEHOLDERS: Record<ApiProvider, { endpoint: string; apiKey: string; modelName: string }> = {
+  lmApiServer: {
+    endpoint: 'https://openrouter.ai/api/v1',
+    apiKey: '<your-api-key>',
+    modelName: 'openrouter/free',
+  },
+  lmStudio: {
+    endpoint: 'http://127.0.0.1:1234/v1',
+    apiKey: 'lm-studio',
+    modelName: 'local-model',
+  },
+  ollama: {
+    endpoint: 'http://127.0.0.1:11434/v1',
+    apiKey: 'ollama',
+    modelName: 'qwen2.5:7b-instruct',
+  },
+}
 
 const Popup = () => {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG)
@@ -48,6 +66,7 @@ const Popup = () => {
 
   const t = getTranslation(config.interfaceLanguage)
   const activeProviderConfig: ProviderConfig = config.providers[config.activeApiProvider]
+  const activePlaceholders = API_PROVIDER_PLACEHOLDERS[config.activeApiProvider]
 
   const providerLabelMap: Record<ApiProvider, string> = {
     lmStudio: t.popup.providerLmStudio,
@@ -482,7 +501,7 @@ const Popup = () => {
                     <input
                       type="text"
                       className="popup-input"
-                      placeholder="http://localhost:1234/v1"
+                      placeholder={activePlaceholders.endpoint}
                       value={activeProviderConfig.apiUrl}
                       onChange={e => updateActiveProviderConfig({ apiUrl: e.target.value })}
                     />
@@ -493,7 +512,7 @@ const Popup = () => {
                     <input
                       type="password"
                       className="popup-input"
-                      placeholder="sk-..."
+                      placeholder={activePlaceholders.apiKey}
                       value={activeProviderConfig.apiKey}
                       onChange={e => updateActiveProviderConfig({ apiKey: e.target.value })}
                     />
@@ -504,7 +523,7 @@ const Popup = () => {
                     <input
                       type="text"
                       className="popup-input"
-                      placeholder="local-model"
+                      placeholder={activePlaceholders.modelName}
                       value={activeProviderConfig.modelName}
                       onChange={e => updateActiveProviderConfig({ modelName: e.target.value })}
                     />

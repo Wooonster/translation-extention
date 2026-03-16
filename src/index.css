@@ -6,20 +6,20 @@
   :root {
     --font-body: "Avenir Next", "Segoe UI", "Helvetica Neue", sans-serif;
     --font-display: "Iowan Old Style", "Palatino Linotype", "Book Antiqua", Georgia, serif;
-    --canvas: oklch(0.972 0.012 80);
-    --canvas-strong: oklch(0.946 0.022 72);
-    --surface: oklch(0.989 0.008 85 / 0.92);
-    --surface-strong: oklch(0.962 0.014 78 / 0.96);
-    --line: oklch(0.79 0.03 60 / 0.45);
-    --line-strong: oklch(0.58 0.08 34 / 0.18);
-    --ink: oklch(0.27 0.028 248);
-    --ink-soft: oklch(0.47 0.022 244);
-    --accent: oklch(0.67 0.156 31);
-    --accent-strong: oklch(0.53 0.149 28);
-    --accent-soft: oklch(0.93 0.04 36);
-    --accent-alt: oklch(0.62 0.11 236);
-    --accent-alt-strong: oklch(0.47 0.1 240);
-    --accent-alt-soft: oklch(0.93 0.03 240);
+    --canvas: oklch(0.968 0.009 212);
+    --canvas-strong: oklch(0.944 0.014 216);
+    --surface: oklch(0.989 0.006 205 / 0.93);
+    --surface-strong: oklch(0.966 0.01 210 / 0.97);
+    --line: oklch(0.78 0.02 228 / 0.44);
+    --line-strong: oklch(0.56 0.05 222 / 0.2);
+    --ink: oklch(0.28 0.024 248);
+    --ink-soft: oklch(0.49 0.018 238);
+    --accent: oklch(0.66 0.082 195);
+    --accent-strong: oklch(0.49 0.088 198);
+    --accent-soft: oklch(0.945 0.026 202);
+    --accent-alt: oklch(0.62 0.13 256);
+    --accent-alt-strong: oklch(0.47 0.12 258);
+    --accent-alt-soft: oklch(0.93 0.034 252);
     --success: oklch(0.56 0.122 156);
     --success-soft: oklch(0.94 0.035 160);
     --danger: oklch(0.59 0.19 24);
@@ -29,9 +29,9 @@
     --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
     color: var(--ink);
     background:
-      radial-gradient(circle at top left, oklch(0.93 0.05 42 / 0.9), transparent 36%),
-      radial-gradient(circle at top right, oklch(0.95 0.032 220 / 0.7), transparent 30%),
-      linear-gradient(160deg, oklch(0.985 0.006 84), oklch(0.95 0.02 74));
+      radial-gradient(circle at top left, oklch(0.93 0.03 196 / 0.85), transparent 36%),
+      radial-gradient(circle at top right, oklch(0.945 0.03 248 / 0.72), transparent 30%),
+      linear-gradient(160deg, oklch(0.987 0.004 210), oklch(0.953 0.012 216));
   }
 
   html,
@@ -86,6 +86,10 @@
     --accent: var(--accent-alt);
     --accent-strong: var(--accent-alt-strong);
     --accent-soft: var(--accent-alt-soft);
+    --canvas: oklch(0.962 0.016 252);
+    --canvas-strong: oklch(0.94 0.022 252);
+    --surface: oklch(0.985 0.01 248 / 0.93);
+    --surface-strong: oklch(0.962 0.018 248 / 0.97);
   }
 
   .popup-shell::before,
@@ -157,11 +161,13 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
+    min-height: 26px;
     border-radius: 999px;
     border: 1px solid color-mix(in oklab, var(--line) 85%, white);
     background: color-mix(in oklab, var(--surface) 72%, white);
     padding: 4px 10px;
     font-size: 9px;
+    line-height: 1;
     font-weight: 700;
     letter-spacing: 0.12em;
     text-transform: uppercase;
@@ -172,11 +178,13 @@
 
   .popup-kicker::before {
     content: "";
+    flex: 0 0 8px;
     width: 8px;
     height: 8px;
     border-radius: 999px;
     background: linear-gradient(135deg, color-mix(in oklab, var(--accent) 76%, white), var(--accent-strong));
     box-shadow: 0 0 0 4px color-mix(in oklab, var(--accent-soft) 55%, transparent);
+    transform: translateY(-0.5px);
     animation: popup-dot 2.4s var(--ease-out) infinite;
   }
 

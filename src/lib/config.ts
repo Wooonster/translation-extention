@@ -35,9 +35,9 @@ const DEFAULT_PROVIDER_CONFIGS: Record<ApiProvider, ProviderConfig> = {
     prompt: '你是一个专业的翻译助手。请将用户提供的文本翻译成中文。直接输出翻译结果，不要包含任何解释、拼音或其他无关内容。',
   },
   lmApiServer: {
-    apiUrl: 'http://127.0.0.1:8000/v1',
+    apiUrl: 'https://openrouter.ai/api/v1',
     apiKey: '',
-    modelName: 'your-model-name',
+    modelName: 'openrouter/free',
     prompt: '你是一个专业的翻译助手。请将用户提供的文本翻译成中文。直接输出翻译结果，不要包含任何解释、拼音或其他无关内容。',
   },
   ollama: {
@@ -52,7 +52,7 @@ export const DEFAULT_CONFIG: AppConfig = {
   floatingEnabled: true,
   floatingStreamEnabled: false,
   apiUrl: 'https://openrouter.ai/api/v1',
-  apiKey: 'sk-or-your-openrouter-key',
+  apiKey: '',
   modelName: 'openrouter/free',
   prompt: '你是一个专业的翻译助手。请将用户提供的文本翻译成中文。直接输出翻译结果，不要包含任何解释、拼音或其他无关内容。',
   activeApiProvider: 'lmApiServer',

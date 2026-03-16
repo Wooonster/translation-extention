@@ -1,42 +1,61 @@
 <svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="bgGrad" x1="16" y1="12" x2="112" y2="118" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFB07A"/>
-      <stop offset="1" stop-color="#5D8CFF"/>
+    <!-- Background: Very Light Neutral Gray -->
+    <linearGradient id="bgGradient" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FCFCFD"/>
+      <stop offset="1" stop-color="#F2F4F7"/>
     </linearGradient>
-    <linearGradient id="bubbleWarm" x1="18" y1="18" x2="84" y2="86" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#FFF8F1"/>
-      <stop offset="1" stop-color="#FFEADB"/>
+
+    <!-- Color 1: Emerald Teal (Vibrant & Trustworthy) -->
+    <linearGradient id="tealGrad" x1="22" y1="22" x2="64" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#0D9488"/>
     </linearGradient>
-    <linearGradient id="bubbleCool" x1="40" y1="48" x2="106" y2="112" gradientUnits="userSpaceOnUse">
-      <stop offset="0" stop-color="#F4F7FF"/>
-      <stop offset="1" stop-color="#E4ECFF"/>
+
+    <!-- Color 2: Vivid Indigo (Deep & Modern) -->
+    <linearGradient id="indigoGrad" x1="106" y1="22" x2="64" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#4F46E5"/>
     </linearGradient>
-    <filter id="softShadow" x="6" y="8" width="116" height="114" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
-      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
-      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
-      <feOffset dy="4"/>
-      <feGaussianBlur stdDeviation="4"/>
-      <feComposite in2="hardAlpha" operator="out"/>
-      <feColorMatrix type="matrix" values="0 0 0 0 0.18 0 0 0 0 0.22 0 0 0 0 0.4 0 0 0 0.28 0"/>
-      <feBlend mode="normal" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
-      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+
+    <!-- Shadow for the larger central element -->
+    <filter id="centerShadow" x="12" y="16" width="104" height="104" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#4F46E5" flood-opacity="0.15"/>
+    </filter>
+    
+    <!-- Glow for the AI sparkle -->
+    <filter id="glow" x="54" y="54" width="20" height="20" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
     </filter>
   </defs>
 
-  <rect x="8" y="8" width="112" height="112" rx="30" fill="url(#bgGrad)"/>
-  <rect x="9" y="9" width="110" height="110" rx="29" stroke="white" stroke-opacity="0.22"/>
+  <!-- 1. Background Container -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bgGradient)"/>
+  <rect x="8" y="8" width="112" height="112" rx="28" stroke="#E6E8EB" stroke-width="1"/>
 
-  <g filter="url(#softShadow)">
-    <path d="M28 28C28 22.4772 32.4772 18 38 18H75C80.5228 18 85 22.4772 85 28V58C85 63.5228 80.5228 68 75 68H48L38 78V68C32.4772 68 28 63.5228 28 58V28Z" fill="url(#bubbleWarm)"/>
-    <path d="M50 48C50 42.4772 54.4772 38 60 38H92C97.5228 38 102 42.4772 102 48V79C102 84.5228 97.5228 89 92 89H82L73 98V89H60C54.4772 89 50 84.5228 50 79V48Z" fill="url(#bubbleCool)"/>
+  <!-- 2. The Larger Unified Central Symbol -->
+  <g filter="url(#centerShadow)">
+    <!-- Left Half: Teal (Source) -->
+    <path d="M64 22 C40.804 22 22 40.804 22 64 C22 87.196 40.804 106 64 106 V64 H64 L64 22 Z" fill="url(#tealGrad)"/>
+    
+    <!-- Right Half: Indigo (Target) -->
+    <path d="M64 22 C87.196 22 106 40.804 106 64 C106 87.196 87.196 106 64 106 V64 H64 L64 22 Z" fill="url(#indigoGrad)"/>
+    
+    <!-- Interlocking Detail -->
+    <path d="M64 22 C64 36 50 50 50 64 C50 78 64 92 64 106" stroke="white" stroke-opacity="0.25" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- 3. Functional Glyphs (Balanced Sizes) -->
+    <!-- 'A' on Teal side -> Using Indigo color -->
+    <text x="44" y="73" fill="#4F46E5" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="bold" text-anchor="middle">A</text>
+    
+    <!-- '文' on Indigo side -> Using Teal color, size adjusted to 22 for visual balance with 'A' -->
+    <text x="84" y="73" fill="#2DD4BF" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="bold" text-anchor="middle">文</text>
   </g>
 
-  <rect x="38" y="32" width="28" height="7" rx="3.5" fill="#E8855E"/>
-  <rect x="38" y="44" width="36" height="7" rx="3.5" fill="#CF7452"/>
-  <rect x="60" y="52" width="22" height="6.5" rx="3.25" fill="#5D8CFF"/>
-  <rect x="60" y="63" width="30" height="6.5" rx="3.25" fill="#3F73F0"/>
+  <!-- 4. The AI Sparkle (Centered) -->
+  <g filter="url(#glow)">
+    <path d="M64 54 C65 59 67 61 72 62 C67 63 65 65 64 70 C63 65 61 63 56 62 C61 61 63 59 64 54 Z" fill="white"/>
+  </g>
 
-  <circle cx="94" cy="30" r="7" fill="white" fill-opacity="0.42"/>
-  <circle cx="94" cy="30" r="3.2" fill="#FFF4EA"/>
 </svg>

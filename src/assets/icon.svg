@@ -1,5 +1,61 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="128" height="128" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#2563eb"/>
-  <path d="M38 44h52v10H38zM38 62h36v10H38zM38 80h52v10H38z" fill="#ffffff" opacity="0.95"/>
-  <circle cx="92" cy="64" r="10" fill="#ffffff" opacity="0.95"/>
+<svg width="128" height="128" viewBox="0 0 128 128" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <!-- Background: Very Light Neutral Gray -->
+    <linearGradient id="bgGradient" x1="64" y1="0" x2="64" y2="128" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#FCFCFD"/>
+      <stop offset="1" stop-color="#F2F4F7"/>
+    </linearGradient>
+
+    <!-- Color 1: Emerald Teal (Vibrant & Trustworthy) -->
+    <linearGradient id="tealGrad" x1="22" y1="22" x2="64" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#2DD4BF"/>
+      <stop offset="1" stop-color="#0D9488"/>
+    </linearGradient>
+
+    <!-- Color 2: Vivid Indigo (Deep & Modern) -->
+    <linearGradient id="indigoGrad" x1="106" y1="22" x2="64" y2="106" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#818CF8"/>
+      <stop offset="1" stop-color="#4F46E5"/>
+    </linearGradient>
+
+    <!-- Shadow for the larger central element -->
+    <filter id="centerShadow" x="12" y="16" width="104" height="104" filterUnits="userSpaceOnUse">
+      <feDropShadow dx="0" dy="6" stdDeviation="5" flood-color="#4F46E5" flood-opacity="0.15"/>
+    </filter>
+    
+    <!-- Glow for the AI sparkle -->
+    <filter id="glow" x="54" y="54" width="20" height="20" filterUnits="userSpaceOnUse">
+      <feGaussianBlur stdDeviation="1.5" result="blur"/>
+      <feComposite in="SourceGraphic" in2="blur" operator="over"/>
+    </filter>
+  </defs>
+
+  <!-- 1. Background Container -->
+  <rect x="8" y="8" width="112" height="112" rx="28" fill="url(#bgGradient)"/>
+  <rect x="8" y="8" width="112" height="112" rx="28" stroke="#E6E8EB" stroke-width="1"/>
+
+  <!-- 2. The Larger Unified Central Symbol -->
+  <g filter="url(#centerShadow)">
+    <!-- Left Half: Teal (Source) -->
+    <path d="M64 22 C40.804 22 22 40.804 22 64 C22 87.196 40.804 106 64 106 V64 H64 L64 22 Z" fill="url(#tealGrad)"/>
+    
+    <!-- Right Half: Indigo (Target) -->
+    <path d="M64 22 C87.196 22 106 40.804 106 64 C106 87.196 87.196 106 64 106 V64 H64 L64 22 Z" fill="url(#indigoGrad)"/>
+    
+    <!-- Interlocking Detail -->
+    <path d="M64 22 C64 36 50 50 50 64 C50 78 64 92 64 106" stroke="white" stroke-opacity="0.25" stroke-width="2.5" stroke-linecap="round"/>
+
+    <!-- 3. Functional Glyphs (Balanced Sizes) -->
+    <!-- 'A' on Teal side -> Using Indigo color -->
+    <text x="44" y="73" fill="#4F46E5" font-family="system-ui, -apple-system, sans-serif" font-size="24" font-weight="bold" text-anchor="middle">A</text>
+    
+    <!-- '文' on Indigo side -> Using Teal color, size adjusted to 22 for visual balance with 'A' -->
+    <text x="84" y="73" fill="#2DD4BF" font-family="system-ui, -apple-system, sans-serif" font-size="22" font-weight="bold" text-anchor="middle">文</text>
+  </g>
+
+  <!-- 4. The AI Sparkle (Centered) -->
+  <g filter="url(#glow)">
+    <path d="M64 54 C65 59 67 61 72 62 C67 63 65 65 64 70 C63 65 61 63 56 62 C61 61 63 59 64 54 Z" fill="white"/>
+  </g>
+
 </svg>
