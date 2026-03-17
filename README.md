@@ -129,3 +129,6 @@ npm run release
 ```
 
 输出文件：`floator-<version>.zip`
+
+## License
+MIT. See [LICENSE](LICENSE).
