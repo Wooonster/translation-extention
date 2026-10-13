@@ -1,5 +1,20 @@
 import { getConfig } from '../lib/config'
 import { dlog, derr, initDebug } from '../lib/debug'
+import {
+  applySummary,
+  deleteEntry,
+  entriesForSummary,
+  loadMemory,
+  markEntryError,
+  markEntryReady,
+  saveMemory,
+  snoozeReview,
+  upsertPendingEntry,
+  type InterfaceLanguage,
+  type SaveVocabInput,
+  type VocabEntry,
+  type VocabSummary,
+} from '../lib/memory'
 
 initDebug()
 dlog('Background service worker loaded.')
@@ -43,6 +58,41 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     handlePreload()
       .then(() => sendResponse({ status: 'success' }))
       .catch(error => sendResponse({ status: 'error', error: error.message }))
+    return true
+  }
+
+  if (request.action === 'SAVE_VOCAB') {
+    handleSaveVocab(request.payload)
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Save failed') }))
+    return true
+  }
+
+  if (request.action === 'ENRICH_VOCAB') {
+    handleEnrichVocab(request.payload)
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Enrichment failed') }))
+    return true
+  }
+
+  if (request.action === 'SUMMARIZE_VOCAB') {
+    handleSummarizeVocab(request.payload)
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Summary failed') }))
+    return true
+  }
+
+  if (request.action === 'DELETE_VOCAB') {
+    handleDeleteVocab(request.payload?.id)
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Delete failed') }))
+    return true
+  }
+
+  if (request.action === 'SNOOZE_VOCAB_REVIEW') {
+    handleSnoozeVocabReview()
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Snooze failed') }))
     return true
   }
 })
@@ -420,6 +470,334 @@ async function handleFollowup(query: string, sourceText: string, translatedText:
   const content = extractAssistantContent(data)
   if (!content) return 'No response returned.'
   return stripEdgeNewlines(content)
+}
+
+let memoryQueue: Promise<void> = Promise.resolve()
+
+function withMemoryLock<T>(task: () => Promise<T>): Promise<T> {
+  const run = memoryQueue.then(task, task)
+  memoryQueue = run.then(
+    () => undefined,
+    () => undefined
+  )
+  return run
+}
+
+function errorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message) return error.message
+  return fallback
+}
+
+async function handleSaveVocab(payload: Partial<SaveVocabInput> | null | undefined): Promise<VocabEntry> {
+  const saved = await withMemoryLock(async () => {
+    const memory = await loadMemory()
+    const next = upsertPendingEntry(memory, {
+      word: typeof payload?.word === 'string' ? payload.word : '',
+      sourceSentence: typeof payload?.sourceSentence === 'string' ? payload.sourceSentence : '',
+      sourceUrl: typeof payload?.sourceUrl === 'string' ? payload.sourceUrl : '',
+      sourceTitle: typeof payload?.sourceTitle === 'string' ? payload.sourceTitle : '',
+    })
+    if (!next) throw new Error('Word is empty')
+    await saveMemory(next.memory)
+    return next.entry
+  })
+  return saved
+}
+
+async function handleDeleteVocab(id: unknown): Promise<{ id: string }> {
+  const entryId = typeof id === 'string' ? id : ''
+  if (!entryId) throw new Error('Vocabulary entry not found')
+  await withMemoryLock(async () => {
+    const memory = await loadMemory()
+    await saveMemory(deleteEntry(memory, entryId))
+  })
+  return { id: entryId }
+}
+
+async function handleSnoozeVocabReview() {
+  return withMemoryLock(async () => {
+    const memory = await loadMemory()
+    const next = snoozeReview(memory)
+    await saveMemory(next)
+    return next.review
+  })
+}
+
+async function handleEnrichVocab(payload: any): Promise<VocabEntry> {
+  dlog('[Vocab] Enrich request')
+  const config = await getConfig()
+  const interfaceLanguage = resolveInterfaceLanguage(payload?.interfaceLanguage, config.interfaceLanguage)
+  const entry = await withMemoryLock(() => resolveEnrichEntry(payload))
+
+  try {
+    const endpoint = resolveChatCompletionsEndpoint(config.apiUrl)
+    const prompt = buildEnrichPrompt({
+      word: entry.word,
+      sourceSentence: entry.sourceSentence,
+      interfaceLanguage,
+    })
+    const isTranslateGemma = isTranslateGemmaModel(config.modelName)
+    const messages = isTranslateGemma
+      ? [{ role: 'user', content: prompt }]
+      : [
+          { role: 'system', content: enrichSystemPrompt(interfaceLanguage) },
+          { role: 'user', content: prompt },
+        ]
+
+    const response = await fetch(endpoint, {
+      method: 'POST',
+      headers: buildRequestHeaders(config.apiKey),
+      body: JSON.stringify({
+        model: config.modelName,
+        messages,
+        temperature: 0.1,
+        top_p: 0.9,
+      }),
+    })
+
+    if (!response.ok) await throwApiError(response, 'Enrichment failed')
+
+    const data = await response.json()
+    const parsed = parseEnrichmentJson(extractAssistantContent(data))
+    if (!parsed.ipa && !parsed.translation && !parsed.explanation) {
+      throw new Error('Enrichment failed')
+    }
+
+    const updated = await withMemoryLock(async () => {
+      const memory = await loadMemory()
+      const next = markEntryReady(memory, entry.id, parsed)
+      if (!next.entry) throw new Error('Vocabulary entry not found')
+      await saveMemory(next.memory)
+      return next.entry
+    })
+    return updated
+  } catch (error) {
+    derr('[Vocab] Enrichment failed')
+    await withMemoryLock(async () => {
+      const memory = await loadMemory()
+      const next = markEntryError(memory, entry.id)
+      if (!next.entry) return
+      await saveMemory(next.memory)
+    }).catch(() => {})
+    throw error
+  }
+}
+
+async function resolveEnrichEntry(payload: any): Promise<VocabEntry> {
+  const memory = await loadMemory()
+  const id = typeof payload?.id === 'string' ? payload.id : ''
+  if (id) {
+    const found = memory.entries.find(item => item.id === id)
+    if (found) return found
+  }
+
+  const word = typeof payload?.word === 'string' ? payload.word : ''
+  const saved = upsertPendingEntry(memory, {
+    word,
+    sourceSentence: typeof payload?.sourceSentence === 'string' ? payload.sourceSentence : word,
+    sourceUrl: typeof payload?.sourceUrl === 'string' ? payload.sourceUrl : '',
+    sourceTitle: typeof payload?.sourceTitle === 'string' ? payload.sourceTitle : '',
+  })
+  if (!saved) throw new Error('Vocabulary entry not found')
+  await saveMemory(saved.memory)
+  return saved.entry
+}
+
+async function handleSummarizeVocab(payload: any): Promise<VocabSummary> {
+  dlog('[Vocab] Summary request')
+  const config = await getConfig()
+  const interfaceLanguage = resolveInterfaceLanguage(payload?.interfaceLanguage, config.interfaceLanguage)
+  const memory = await loadMemory()
+  const picked = entriesForSummary(memory, 50)
+  if (!picked.length) throw new Error('Vocabulary bank is empty')
+
+  const endpoint = resolveChatCompletionsEndpoint(config.apiUrl)
+  const prompt = buildSummaryPrompt({
+    entries: picked,
+    interfaceLanguage,
+    hasNewWords: memory.review.newSinceSummary > 0,
+  })
+  const isTranslateGemma = isTranslateGemmaModel(config.modelName)
+  const messages = isTranslateGemma
+    ? [{ role: 'user', content: prompt }]
+    : [
+        { role: 'system', content: summarySystemPrompt(interfaceLanguage) },
+        { role: 'user', content: prompt },
+      ]
+
+  const response = await fetch(endpoint, {
+    method: 'POST',
+    headers: buildRequestHeaders(config.apiKey),
+    body: JSON.stringify({
+      model: config.modelName,
+      messages,
+      temperature: 0.3,
+      top_p: 0.95,
+    }),
+  })
+
+  if (!response.ok) await throwApiError(response, 'Summary failed')
+
+  const data = await response.json()
+  const text = parseSummaryText(extractAssistantContent(data))
+  if (!text) throw new Error('Summary failed')
+
+  const stored = await withMemoryLock(async () => {
+    const latest = await loadMemory()
+    const next = applySummary(latest, text, picked.map(entry => entry.id))
+    await saveMemory(next.memory)
+    return next.summary
+  })
+  return stored
+}
+
+function resolveInterfaceLanguage(value: unknown, fallback: InterfaceLanguage): InterfaceLanguage {
+  if (value === 'zh' || value === 'en') return value
+  return fallback === 'zh' ? 'zh' : 'en'
+}
+
+function enrichSystemPrompt(interfaceLanguage: InterfaceLanguage): string {
+  if (interfaceLanguage === 'zh') return '你是词汇助手。只输出严格 JSON，不要附加说明。'
+  return 'You are a vocabulary assistant. Output strict JSON only, with no extra commentary.'
+}
+
+function summarySystemPrompt(interfaceLanguage: InterfaceLanguage): string {
+  if (interfaceLanguage === 'zh') return '你是词汇复习助手。用中文写一段简短、可执行的复习摘要。'
+  return 'You are a vocabulary review assistant. Write a short, practical study digest.'
+}
+
+function buildEnrichPrompt(params: {
+  word: string
+  sourceSentence: string
+  interfaceLanguage: InterfaceLanguage
+}): string {
+  const sentence = clipPromptText(params.sourceSentence, 1000)
+  if (params.interfaceLanguage === 'zh') {
+    return (
+      '只输出严格 JSON，不要使用 markdown 代码块，不要附加任何其他文字。\n' +
+      'JSON 必须只包含这三个键："ipa"、"translation"、"explanation"。\n' +
+      '- ipa：所保存单词本身的国际音标读音。\n' +
+      '- translation：将该词翻译成中文。\n' +
+      '- explanation：结合原句，用中文简要解释这个词。\n\n' +
+      `单词：${params.word}\n` +
+      `原句：${sentence}`
+    )
+  }
+
+  return (
+    'Reply with strict JSON only. Do not use markdown fences. Do not add any other text.\n' +
+    'The JSON object must have exactly these keys: "ipa", "translation", "explanation".\n' +
+    '- ipa: IPA pronunciation of the saved word itself.\n' +
+    '- translation: translate the word into English.\n' +
+    '- explanation: a short English explanation of the word in this sentence.\n\n' +
+    `Word: ${params.word}\n` +
+    `Source sentence: ${sentence}`
+  )
+}
+
+function buildSummaryPrompt(params: {
+  entries: VocabEntry[]
+  interfaceLanguage: InterfaceLanguage
+  hasNewWords: boolean
+}): string {
+  const lines = params.entries.map((entry, index) => formatSummaryEntry(entry, index)).join('\n')
+  if (params.interfaceLanguage === 'zh') {
+    const scope = params.hasNewWords
+      ? '下面这些词是上次总结之后保存的。'
+      : '用户希望总结整本词库，即使上次总结后没有新词。'
+    return (
+      `${scope}\n` +
+      '请用中文写一段简短的复习摘要：把相关的词放在一起，点出易混之处，并建议接下来复习什么。纯文本，不要表格，控制在 180 字以内。\n\n' +
+      `词条：\n${lines}`
+    )
+  }
+
+  const scope = params.hasNewWords
+    ? 'These entries were saved since the last summary.'
+    : 'The learner asked for a summary of the whole bank, even if nothing new was saved since the last summary.'
+  return (
+    `${scope}\n` +
+    'Write a short study digest: group related words, note easy mix-ups, and suggest what to review next. Plain text, no tables, under 180 words.\n\n' +
+    `Entries:\n${lines}`
+  )
+}
+
+function formatSummaryEntry(entry: VocabEntry, index: number): string {
+  const parts = [entry.word]
+  if (entry.ipa) parts.push(entry.ipa)
+  if (entry.translation) parts.push(entry.translation)
+  if (entry.explanation) parts.push(clipPromptText(entry.explanation, 180))
+  const sentence = clipPromptText(entry.sourceSentence.replace(/\s+/g, ' '), 280)
+  if (sentence) parts.push(sentence)
+  return `${index + 1}. ${parts.join(' — ')}`
+}
+
+function clipPromptText(value: string, max: number): string {
+  const trimmed = String(value ?? '').replace(/^\s+/, '').replace(/\s+$/, '')
+  if (trimmed.length <= max) return trimmed
+  return `${trimmed.slice(0, Math.max(0, max - 1))}…`
+}
+
+function parseEnrichmentJson(raw: string): { ipa: string; translation: string; explanation: string } {
+  const text = extractJsonObject(stripJsonFences(raw))
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(text)
+  } catch {
+    throw new Error('Enrichment failed')
+  }
+  if (Array.isArray(parsed)) {
+    parsed = parsed.find(item => item && typeof item === 'object' && !Array.isArray(item))
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) throw new Error('Enrichment failed')
+  const obj = parsed as Record<string, unknown>
+  return {
+    ipa: readJsonString(obj, ['ipa']),
+    translation: readJsonString(obj, ['translation']),
+    explanation: readJsonString(obj, ['explanation']),
+  }
+}
+
+function parseSummaryText(raw: string): string {
+  const stripped = stripJsonFences(raw).trim()
+  if (stripped.startsWith('{') && stripped.endsWith('}')) {
+    try {
+      const parsed = JSON.parse(stripped) as Record<string, unknown>
+      const value = parsed.text || parsed.summary || parsed.digest
+      if (typeof value === 'string' && value.trim()) return value.trim()
+    } catch {
+      // The model returned prose that only looks like a brace-wrapped block.
+    }
+  }
+  return stripped
+}
+
+function stripJsonFences(raw: string): string {
+  let text = String(raw ?? '').trim()
+  const fenced = text.match(/^```(?:json)?\s*([\s\S]*?)\s*```$/i)
+  if (fenced) return fenced[1].trim()
+  text = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '')
+  return text.trim()
+}
+
+function extractJsonObject(text: string): string {
+  const start = text.indexOf('{')
+  const end = text.lastIndexOf('}')
+  if (start >= 0 && end > start) return text.slice(start, end + 1)
+  return text
+}
+
+function readJsonString(obj: Record<string, unknown>, keys: string[]): string {
+  for (const key of keys) {
+    const value = obj[key]
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  const lowered = new Map(Object.entries(obj).map(([key, value]) => [key.toLowerCase(), value]))
+  for (const key of keys) {
+    const value = lowered.get(key.toLowerCase())
+    if (typeof value === 'string' && value.trim()) return value.trim()
+  }
+  return ''
 }
 
 function buildTranslationCacheKey(params: {

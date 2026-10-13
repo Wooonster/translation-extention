@@ -3,6 +3,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { getTranslation, getLanguageName, type LanguageCode } from '../../lib/i18n'
 import { getConfig } from '../../lib/config'
+import type { VocabEntry, VocabSummary } from '../../lib/memory'
 
 interface FloatingBoxProps {
   position: { top: number; left: number }
@@ -14,9 +15,87 @@ interface FloatingBoxProps {
   progress?: number // 0-100 for countdown
   onFollowup?: (query: string, sourceText: string, translatedText: string) => Promise<string>
   onClose?: () => void
+  onSaveVocab?: (input: { word: string; sourceSentence: string }) => Promise<VocabEntry>
+  onEnrichVocab?: (id: string, interfaceLanguage: LanguageCode) => Promise<VocabEntry>
+  onSummarizeVocab?: (interfaceLanguage: LanguageCode) => Promise<VocabSummary>
+  onSnoozeReview?: () => Promise<void> | void
+  reviewNotice?: { count: number } | null
 }
 
-const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, status, sourceText, sourceLang, result, progress = 0, onFollowup, onClose }) => {
+interface OriginalToken {
+  text: string
+  selectable: boolean
+  index: number
+}
+
+interface TokenRange {
+  start: number
+  end: number
+}
+
+interface SaveFeedback {
+  phase: 'idle' | 'saving' | 'pending' | 'ready' | 'error'
+  entryId?: string
+  word?: string
+  sourceSentence?: string
+  detail?: string
+}
+
+const idleSaveFeedback: SaveFeedback = { phase: 'idle' }
+
+function tokenizeOriginal(text: string): OriginalToken[] {
+  if (typeof Intl !== 'undefined' && typeof Intl.Segmenter === 'function') {
+    try {
+      const segmenter = new Intl.Segmenter(segmenterLocale(text), { granularity: 'word' })
+      return Array.from(segmenter.segment(text), (segment, index) => ({
+        text: segment.segment,
+        selectable: Boolean(segment.isWordLike),
+        index,
+      }))
+    } catch {
+      // Segmenter can reject an unsupported locale. Whitespace splitting still selects words.
+    }
+  }
+
+  return text
+    .split(/(\s+)/)
+    .filter(part => part.length > 0)
+    .map((part, index) => ({
+      text: part,
+      selectable: /\S/.test(part) && /[\p{L}\p{N}]/u.test(part),
+      index,
+    }))
+}
+
+function segmenterLocale(text: string): string | undefined {
+  if (/[\u3040-\u30ff]/.test(text)) return 'ja'
+  if (/[\uac00-\ud7af]/.test(text)) return 'ko'
+  if (/[\u4e00-\u9fff]/.test(text)) return 'zh'
+  return undefined
+}
+
+function clipLabel(text: string, max = 36): string {
+  const trimmed = text.trim()
+  if (trimmed.length <= max) return trimmed
+  return `${trimmed.slice(0, Math.max(1, max - 1))}…`
+}
+
+const FloatingBox: React.FC<FloatingBoxProps> = ({
+  position,
+  selectionKey,
+  status,
+  sourceText,
+  sourceLang,
+  result,
+  progress = 0,
+  onFollowup,
+  onClose,
+  onSaveVocab,
+  onEnrichVocab,
+  onSummarizeVocab,
+  onSnoozeReview,
+  reviewNotice,
+}) => {
   if (status === 'idle') return null
 
   const basePosition = useMemo(() => ({ top: position.top + 10, left: position.left }), [position.left, position.top])
@@ -35,7 +114,17 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
   const swipeStartXRef = useRef<number | null>(null)
   const composingRef = useRef(false)
   const [lang, setLang] = useState<LanguageCode>('en')
+  const [originalOpen, setOriginalOpen] = useState(false)
+  const [tokenRange, setTokenRange] = useState<TokenRange | null>(null)
+  const [saveFeedback, setSaveFeedback] = useState<SaveFeedback>(idleSaveFeedback)
+  const [reviewDigest, setReviewDigest] = useState('')
+  const [reviewError, setReviewError] = useState('')
+  const [summarizing, setSummarizing] = useState(false)
+  const [noticeDismissed, setNoticeDismissed] = useState(false)
   const followupListRef = useRef<HTMLDivElement | null>(null)
+  const originalBodyRef = useRef<HTMLDivElement | null>(null)
+  const tokenDragRef = useRef<{ anchor: number } | null>(null)
+  const saveRequestRef = useRef(0)
 
   useEffect(() => {
     getConfig().then(config => setLang(config.interfaceLanguage || 'en'))
@@ -61,6 +150,15 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
     setFollowupHistory([])
     setFollowupError('')
     setCurrentPage(0)
+    setOriginalOpen(false)
+    setTokenRange(null)
+    setSaveFeedback(idleSaveFeedback)
+    setReviewDigest('')
+    setReviewError('')
+    setSummarizing(false)
+    setNoticeDismissed(false)
+    tokenDragRef.current = null
+    saveRequestRef.current += 1
   }, [selectionKey])
 
   useEffect(() => {
@@ -164,8 +262,161 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
     if (currentPage > pageCount - 1) setCurrentPage(pageCount - 1)
   }, [currentPage, pageCount])
 
+  useEffect(() => {
+    setNoticeDismissed(false)
+  }, [reviewNotice?.count])
+
+  const originalText = String(sourceText ?? '')
+  const tokens = useMemo(() => tokenizeOriginal(originalText), [originalText])
+  const pickedText = useMemo(() => {
+    if (!tokenRange) return ''
+    if (tokenRange.start < 0 || tokenRange.end >= tokens.length) return ''
+    return tokens
+      .slice(tokenRange.start, tokenRange.end + 1)
+      .map(token => token.text)
+      .join('')
+      .replace(/\s+/g, ' ')
+      .trim()
+  }, [tokenRange, tokens])
+  const showSaveChip = Boolean(pickedText) && /[\p{L}\p{N}]/u.test(pickedText)
+  const showReview = Boolean(reviewDigest) || (Boolean(reviewNotice) && !noticeDismissed)
+  const reviewLabel = !reviewNotice
+    ? ''
+    : lang === 'en' && reviewNotice.count === 1
+      ? t.floating.reviewReadyOne
+      : t.floating.reviewReady.replace('{count}', String(reviewNotice.count))
+
+  const resolveTokenIndex = (clientX: number, clientY: number): number | null => {
+    const root = originalBodyRef.current?.getRootNode()
+    const hit = root instanceof ShadowRoot ? root.elementFromPoint(clientX, clientY) : document.elementFromPoint(clientX, clientY)
+    const tokenEl = hit?.closest?.('[data-token-index]')
+    if (!tokenEl) return null
+    const index = Number(tokenEl.getAttribute('data-token-index'))
+    return Number.isInteger(index) ? index : null
+  }
+
+  const onTokenPointerDown = (event: React.PointerEvent<HTMLDivElement>) => {
+    if (event.button !== 0) return
+    const index = resolveTokenIndex(event.clientX, event.clientY)
+    if (index == null || !tokens[index]?.selectable) return
+    event.preventDefault()
+    tokenDragRef.current = { anchor: index }
+    setTokenRange({ start: index, end: index })
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  const onTokenPointerMove = (event: React.PointerEvent<HTMLDivElement>) => {
+    const anchor = tokenDragRef.current?.anchor
+    if (anchor == null) return
+    const index = resolveTokenIndex(event.clientX, event.clientY)
+    if (index == null) return
+    setTokenRange({ start: Math.min(anchor, index), end: Math.max(anchor, index) })
+  }
+
+  const onTokenPointerUp = () => {
+    tokenDragRef.current = null
+  }
+
+  const commitSave = async (word: string, sourceSentence: string) => {
+    const trimmedWord = word.trim()
+    const trimmedSentence = sourceSentence.trim() || trimmedWord
+    if (!trimmedWord || !onSaveVocab || !onEnrichVocab) return
+
+    const requestId = saveRequestRef.current + 1
+    saveRequestRef.current = requestId
+    setSaveFeedback({ phase: 'saving', word: trimmedWord, sourceSentence: trimmedSentence })
+    setTokenRange(null)
+
+    try {
+      const entry = await onSaveVocab({ word: trimmedWord, sourceSentence: trimmedSentence })
+      if (saveRequestRef.current !== requestId) return
+      setSaveFeedback({
+        phase: 'pending',
+        entryId: entry.id,
+        word: entry.word,
+        sourceSentence: trimmedSentence,
+      })
+
+      try {
+        const enriched = await onEnrichVocab(entry.id, lang)
+        if (saveRequestRef.current !== requestId) return
+        setSaveFeedback({
+          phase: enriched.status === 'ready' ? 'ready' : 'error',
+          entryId: enriched.id,
+          word: enriched.word,
+          sourceSentence: trimmedSentence,
+          detail: enriched.translation,
+        })
+      } catch {
+        if (saveRequestRef.current !== requestId) return
+        setSaveFeedback({
+          phase: 'error',
+          entryId: entry.id,
+          word: entry.word,
+          sourceSentence: trimmedSentence,
+        })
+      }
+    } catch {
+      if (saveRequestRef.current !== requestId) return
+      setSaveFeedback({ phase: 'error', word: trimmedWord, sourceSentence: trimmedSentence })
+    }
+  }
+
+  const retrySave = () => {
+    if (saveFeedback.phase === 'saving') return
+    if (saveFeedback.entryId && onEnrichVocab) {
+      const requestId = saveRequestRef.current + 1
+      saveRequestRef.current = requestId
+      const entryId = saveFeedback.entryId
+      setSaveFeedback(prev => ({ ...prev, phase: 'pending' }))
+      onEnrichVocab(entryId, lang)
+        .then(enriched => {
+          if (saveRequestRef.current !== requestId) return
+          setSaveFeedback(prev => ({
+            ...prev,
+            phase: enriched.status === 'ready' ? 'ready' : 'error',
+            entryId: enriched.id,
+            word: enriched.word,
+            detail: enriched.translation,
+          }))
+        })
+        .catch(() => {
+          if (saveRequestRef.current !== requestId) return
+          setSaveFeedback(prev => ({ ...prev, phase: 'error', entryId }))
+        })
+      return
+    }
+    if (saveFeedback.word) {
+      void commitSave(saveFeedback.word, saveFeedback.sourceSentence || originalText.trim())
+    }
+  }
+
+  const runSummary = async () => {
+    if (!onSummarizeVocab || summarizing) return
+    setSummarizing(true)
+    setReviewError('')
+    try {
+      const summary = await onSummarizeVocab(lang)
+      setReviewDigest(summary.text)
+    } catch {
+      setReviewError(t.floating.summaryFailed)
+    } finally {
+      setSummarizing(false)
+    }
+  }
+
+  const runLater = async () => {
+    setNoticeDismissed(true)
+    try {
+      await onSnoozeReview?.()
+    } catch {
+      setNoticeDismissed(false)
+    }
+  }
+
   const startSwipe = (e: React.PointerEvent) => {
     if (!canFlip) return
+    if ((e.target as HTMLElement | null)?.closest?.('[data-no-swipe="true"]')) return
     swipeStartXRef.current = e.clientX
   }
 
@@ -278,6 +529,67 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                     {t.floating.streaming}
                   </div>
                 )}
+                {originalText.trim() && (
+                  <div
+                    className="ai-translate-original"
+                    data-no-drag="true"
+                    data-no-swipe="true"
+                    onPointerDown={event => event.stopPropagation()}
+                  >
+                    <button
+                      type="button"
+                      className="ai-translate-original-toggle"
+                      data-open={originalOpen}
+                      aria-expanded={originalOpen}
+                      onClick={() => setOriginalOpen(open => !open)}
+                    >
+                      <span>{t.floating.original}</span>
+                      <span className="ai-translate-original-caret" aria-hidden="true" />
+                    </button>
+                    {originalOpen && (
+                      <div
+                        ref={originalBodyRef}
+                        className="ai-translate-original-body"
+                        onPointerDown={onTokenPointerDown}
+                        onPointerMove={onTokenPointerMove}
+                        onPointerUp={onTokenPointerUp}
+                        onPointerCancel={onTokenPointerUp}
+                      >
+                        {tokens.map(token => {
+                          const highlighted = Boolean(
+                            tokenRange &&
+                              token.index >= tokenRange.start &&
+                              token.index <= tokenRange.end &&
+                              !/^\s+$/.test(token.text)
+                          )
+                          return (
+                            <span
+                              key={token.index}
+                              data-token-index={token.index}
+                              data-selectable={token.selectable ? 'true' : 'false'}
+                              data-selected={highlighted ? 'true' : 'false'}
+                              className="ai-translate-token"
+                            >
+                              {token.text}
+                            </span>
+                          )
+                        })}
+                        {showSaveChip && (
+                          <div>
+                            <button
+                              type="button"
+                              className="ai-translate-save-chip"
+                              disabled={saveFeedback.phase === 'saving' || !onSaveVocab}
+                              onClick={() => void commitSave(pickedText, originalText.trim())}
+                            >
+                              {t.floating.saveChip.replace('{word}', clipLabel(pickedText))}
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="ai-translate-markdown prose prose-sm max-w-none">
                   {result ? (
                     <ReactMarkdown remarkPlugins={[remarkGfm]}>
@@ -372,8 +684,55 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
             )}
           </div>
 
+          {showReview && (
+            <div className={`ai-translate-review${reviewDigest ? ' ai-translate-review--digest' : ''}`} data-no-drag="true">
+              {reviewDigest ? (
+                <>
+                  <div className="ai-translate-review-kicker">{t.floating.summaryReady}</div>
+                  <div className="ai-translate-review-summary">{reviewDigest}</div>
+                </>
+              ) : (
+                <>
+                  <span>{reviewError || reviewLabel}</span>
+                  <span className="ai-translate-review-actions">
+                    <button
+                      type="button"
+                      className="ai-translate-review-button"
+                      onClick={() => void runSummary()}
+                      disabled={summarizing || !onSummarizeVocab}
+                    >
+                      {summarizing ? t.floating.summarizing : t.floating.summarize}
+                    </button>
+                    <button type="button" className="ai-translate-review-button" onClick={() => void runLater()} disabled={summarizing}>
+                      {t.floating.later}
+                    </button>
+                  </span>
+                </>
+              )}
+            </div>
+          )}
+
           {/* Action Bar */}
           <div className="ai-translate-footer" data-no-drag="true">
+            {saveFeedback.phase !== 'idle' && (
+              <div
+                className="ai-translate-memory-status"
+                data-status={saveFeedback.phase === 'saving' || saveFeedback.phase === 'pending' ? 'pending' : saveFeedback.phase}
+              >
+                <span>
+                  {saveFeedback.phase === 'saving' && t.floating.saving}
+                  {saveFeedback.phase === 'pending' && t.floating.saved}
+                  {saveFeedback.phase === 'ready' &&
+                    (saveFeedback.detail ? `${t.floating.saved} · ${clipLabel(saveFeedback.detail, 48)}` : t.floating.saved)}
+                  {saveFeedback.phase === 'error' && t.floating.enrichError}
+                </span>
+                {saveFeedback.phase === 'error' && (
+                  <button type="button" className="ai-translate-text-button" onClick={retrySave}>
+                    {t.floating.retry}
+                  </button>
+                )}
+              </div>
+            )}
             {!followupInputOpen ? (
               <div className="ai-translate-footer-row">
                 {/* Pagination Dots */}
@@ -399,7 +758,22 @@ const FloatingBox: React.FC<FloatingBoxProps> = ({ position, selectionKey, statu
                     </svg>
                     <span>{t.floating.askAI}</span>
                   </button>
-                  
+
+                  <div className="ai-translate-divider"></div>
+
+                  <button
+                    type="button"
+                    onClick={() => void commitSave(originalText.trim(), originalText.trim())}
+                    disabled={!originalText.trim() || saveFeedback.phase === 'saving' || !onSaveVocab}
+                    className="ai-translate-action"
+                    title={t.floating.saveToBank}
+                  >
+                    <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M5 5a2 2 0 012-2h10a2 2 0 012 2v16l-7-3.5L5 21V5z" />
+                    </svg>
+                    <span>{t.floating.saveToBank}</span>
+                  </button>
+
                   <div className="ai-translate-divider"></div>
 
                   <button
