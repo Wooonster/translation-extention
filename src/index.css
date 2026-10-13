@@ -256,7 +256,7 @@
 
   .popup-tabs {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     margin: 0 18px;
     padding: 6px;
@@ -275,6 +275,7 @@
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.02em;
+    white-space: nowrap;
     transition:
       transform 180ms var(--ease-out),
       background-color 180ms var(--ease-out),
@@ -834,6 +835,130 @@
 
   .popup-error {
     color: var(--danger);
+  }
+
+  .popup-tab-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  .popup-tab-badge {
+    display: inline-flex;
+    min-width: 16px;
+    height: 16px;
+    align-items: center;
+    justify-content: center;
+    border-radius: 999px;
+    padding: 0 4px;
+    background: var(--accent-strong);
+    color: white;
+    font-size: 9px;
+    line-height: 1;
+  }
+
+  .popup-bank-toolbar,
+  .popup-bank-entry-actions,
+  .popup-bank-head {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  .popup-bank-toolbar,
+  .popup-bank-entry-actions {
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .popup-bank-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .popup-bank-entry {
+    position: relative;
+    z-index: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    border: 1px solid color-mix(in oklab, var(--line) 78%, white);
+    border-radius: 16px;
+    background: color-mix(in oklab, var(--surface) 88%, white);
+    padding: 10px 12px;
+  }
+
+  .popup-bank-word {
+    font-family: var(--font-display);
+    font-size: 16px;
+    line-height: 1.2;
+    color: var(--ink);
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .popup-bank-ipa,
+  .popup-bank-explanation,
+  .popup-bank-sentence,
+  .popup-bank-link {
+    font-size: 11px;
+    line-height: 1.5;
+    color: var(--ink-soft);
+    overflow-wrap: anywhere;
+  }
+
+  .popup-bank-translation,
+  .popup-bank-summary {
+    position: relative;
+    z-index: 1;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: var(--ink);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+  }
+
+  .popup-bank-sentence {
+    font-style: italic;
+  }
+
+  .popup-bank-link {
+    color: var(--accent-strong);
+    text-decoration: none;
+  }
+
+  .popup-bank-link:hover {
+    text-decoration: underline;
+  }
+
+  .popup-bank-status {
+    flex-shrink: 0;
+    border-radius: 999px;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--ink-soft);
+    background: color-mix(in oklab, var(--surface-strong) 80%, white);
+  }
+
+  .popup-bank-status[data-status='error'] {
+    color: var(--danger);
+    background: color-mix(in oklab, var(--danger-soft) 80%, white);
+  }
+
+  .popup-bank-status[data-status='pending'] {
+    color: var(--accent-strong);
+    background: color-mix(in oklab, var(--accent-soft) 80%, white);
+  }
+
+  .popup-bank-entry-actions .popup-action-secondary {
+    min-height: 30px;
+    padding: 0 10px;
   }
 
   .popup-scroll::-webkit-scrollbar {

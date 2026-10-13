@@ -8,6 +8,17 @@ import {
   HOVER_DURATION_MIN_MS,
   getConfig,
 } from '../lib/config'
+import {
+  MEMORY_STORAGE_KEY,
+  emptyMemory,
+  loadMemory,
+  sanitizeMemory,
+  shouldShowReviewNotice,
+  type FloatorMemory,
+  type VocabEntry,
+  type VocabSummary,
+} from '../lib/memory'
+import type { LanguageCode } from '../lib/i18n'
 
 initDebug()
 
@@ -89,6 +100,21 @@ const ContentApp = () => {
   const [result, setResult] = useState<string>('')
   const [sourceLang, setSourceLang] = useState<string>('')
   const [activeSelection, setActiveSelection] = useState<typeof selection>(null)
+  const [memory, setMemory] = useState<FloatorMemory>(emptyMemory)
+
+  useEffect(() => {
+    loadMemory()
+      .then(setMemory)
+      .catch(() => setMemory(emptyMemory()))
+
+    const onMemoryChanged = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, MEMORY_STORAGE_KEY)) return
+      setMemory(sanitizeMemory(changes[MEMORY_STORAGE_KEY]?.newValue))
+    }
+
+    chrome.storage.onChanged.addListener(onMemoryChanged)
+    return () => chrome.storage.onChanged.removeListener(onMemoryChanged)
+  }, [])
 
   // State machine logic
   useEffect(() => {
@@ -218,6 +244,43 @@ const ContentApp = () => {
     throw new Error(response?.error || 'Interaction failed')
   }
 
+  const handleSaveVocab = async (input: { word: string; sourceSentence: string }): Promise<VocabEntry> => {
+    const response = await chrome.runtime.sendMessage({
+      action: 'SAVE_VOCAB',
+      payload: {
+        word: input.word,
+        sourceSentence: input.sourceSentence,
+        sourceUrl: location.href,
+        sourceTitle: document.title || '',
+      },
+    })
+    if (response?.status !== 'success' || !response.data) throw new Error(response?.error || 'Save failed')
+    return response.data as VocabEntry
+  }
+
+  const handleEnrichVocab = async (id: string, interfaceLanguage: LanguageCode): Promise<VocabEntry> => {
+    const response = await chrome.runtime.sendMessage({
+      action: 'ENRICH_VOCAB',
+      payload: { id, interfaceLanguage },
+    })
+    if (response?.status !== 'success' || !response.data) throw new Error(response?.error || 'Enrichment failed')
+    return response.data as VocabEntry
+  }
+
+  const handleSummarizeVocab = async (interfaceLanguage: LanguageCode): Promise<VocabSummary> => {
+    const response = await chrome.runtime.sendMessage({
+      action: 'SUMMARIZE_VOCAB',
+      payload: { interfaceLanguage },
+    })
+    if (response?.status !== 'success' || !response.data) throw new Error(response?.error || 'Summary failed')
+    return response.data as VocabSummary
+  }
+
+  const handleSnoozeReview = async () => {
+    const response = await chrome.runtime.sendMessage({ action: 'SNOOZE_VOCAB_REVIEW' })
+    if (response?.status !== 'success') throw new Error(response?.error || 'Snooze failed')
+  }
+
   const handleClose = () => {
     cancelActiveStream()
     setStatus('idle')
@@ -241,6 +304,11 @@ const ContentApp = () => {
       progress={hoverProgress}
       onFollowup={handleFollowup}
       onClose={handleClose}
+      onSaveVocab={handleSaveVocab}
+      onEnrichVocab={handleEnrichVocab}
+      onSummarizeVocab={handleSummarizeVocab}
+      onSnoozeReview={handleSnoozeReview}
+      reviewNotice={shouldShowReviewNotice(memory) ? { count: memory.review.newSinceSummary } : null}
     />
   )
 }

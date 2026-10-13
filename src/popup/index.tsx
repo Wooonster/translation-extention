@@ -12,6 +12,15 @@ import {
   type ProviderConfig,
 } from '../lib/config'
 import { getTranslation } from '../lib/i18n'
+import {
+  MEMORY_STORAGE_KEY,
+  emptyMemory,
+  isReviewThresholdMet,
+  loadMemory,
+  sanitizeMemory,
+  serializeMemory,
+  type FloatorMemory,
+} from '../lib/memory'
 import '../index.css'
 
 const LANGUAGE_OPTIONS: Array<{ label: string; value: string }> = [
@@ -46,9 +55,245 @@ const API_PROVIDER_PLACEHOLDERS: Record<ApiProvider, { endpoint: string; apiKey:
   },
 }
 
+function safeHttpUrl(value: string): string | null {
+  try {
+    const url = new URL(value)
+    if (url.protocol === 'http:' || url.protocol === 'https:') return url.toString()
+  } catch {
+    return null
+  }
+  return null
+}
+
+function formatStamp(iso: string, lang: 'en' | 'zh'): string {
+  const time = Date.parse(iso)
+  if (!Number.isFinite(time)) return ''
+  return new Date(time).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en')
+}
+
+function BankPanel({
+  memory,
+  interfaceLanguage,
+  t,
+}: {
+  memory: FloatorMemory
+  interfaceLanguage: 'en' | 'zh'
+  t: ReturnType<typeof getTranslation>
+}) {
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [summaryBusy, setSummaryBusy] = useState(false)
+  const [copied, setCopied] = useState(false)
+  const [message, setMessage] = useState('')
+
+  useEffect(() => {
+    if (!copied) return
+    const timer = window.setTimeout(() => setCopied(false), 1500)
+    return () => window.clearTimeout(timer)
+  }, [copied])
+
+  const copyJson = async () => {
+    const text = serializeMemory(memory)
+    try {
+      await navigator.clipboard.writeText(text)
+      setCopied(true)
+      setMessage('')
+      return
+    } catch {
+      // Clipboard can be blocked in the popup. Fall back to a hidden textarea.
+    }
+
+    try {
+      const el = document.createElement('textarea')
+      el.value = text
+      el.setAttribute('readonly', 'true')
+      el.style.position = 'fixed'
+      el.style.left = '-9999px'
+      document.body.appendChild(el)
+      el.select()
+      const ok = document.execCommand('copy')
+      document.body.removeChild(el)
+      if (ok) {
+        setCopied(true)
+        setMessage('')
+        return
+      }
+    } catch {
+      // Leave the message below.
+    }
+    setMessage(t.popup.bankCopyFailed)
+  }
+
+  const downloadJson = () => {
+    const blob = new Blob([serializeMemory(memory)], { type: 'application/json' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = 'floator-memory.json'
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
+  const retryEntry = async (id: string) => {
+    setBusyId(id)
+    setMessage('')
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'ENRICH_VOCAB',
+        payload: { id, interfaceLanguage },
+      })
+      if (response?.status !== 'success') setMessage(response?.error || t.popup.bankError)
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : t.popup.bankError)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const removeEntry = async (id: string) => {
+    setBusyId(id)
+    setMessage('')
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'DELETE_VOCAB',
+        payload: { id },
+      })
+      if (response?.status !== 'success') setMessage(response?.error || t.popup.bankDelete)
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : t.popup.bankDelete)
+    } finally {
+      setBusyId(null)
+    }
+  }
+
+  const summarize = async () => {
+    if (!memory.entries.length) {
+      setMessage(t.popup.bankEmptySummary)
+      return
+    }
+    setSummaryBusy(true)
+    setMessage('')
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'SUMMARIZE_VOCAB',
+        payload: { interfaceLanguage },
+      })
+      if (response?.status !== 'success') setMessage(response?.error || t.popup.bankSummaryFailed)
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : t.popup.bankSummaryFailed)
+    } finally {
+      setSummaryBusy(false)
+    }
+  }
+
+  const summary = memory.review.latestSummary
+  const summaryWhen = summary ? formatStamp(summary.createdAt, interfaceLanguage) : ''
+
+  return (
+    <div className="popup-stack">
+      <section className="popup-panel popup-reveal popup-reveal--2">
+        <div className="popup-bank-head">
+          <div>
+            <div className="popup-caption">{t.popup.tabBank}</div>
+            <div className="popup-result-label">{t.popup.bankSavedCount.replace('{count}', String(memory.entries.length))}</div>
+          </div>
+        </div>
+        <div className="popup-bank-toolbar mt-3">
+          <button type="button" className="popup-action-primary" onClick={() => void summarize()} disabled={summaryBusy}>
+            {summaryBusy ? t.popup.bankSummarizing : t.popup.bankSummarize}
+          </button>
+          <button type="button" className="popup-action-secondary" onClick={() => void copyJson()}>
+            {copied ? t.popup.bankCopied : t.popup.bankCopyJson}
+          </button>
+          <button type="button" className="popup-action-secondary" onClick={downloadJson}>
+            {t.popup.bankDownload}
+          </button>
+        </div>
+        {message && <p className="popup-helper popup-error mt-3">{message}</p>}
+      </section>
+
+      <section className="popup-panel popup-reveal popup-reveal--3">
+        <div className="popup-caption">{t.popup.bankSummaryTitle}</div>
+        {summary ? (
+          <>
+            {summaryWhen && <div className="popup-helper mt-2">{summaryWhen}</div>}
+            <div className="popup-bank-summary mt-2">{summary.text}</div>
+          </>
+        ) : (
+          <div className="popup-empty-state">
+            <span className="popup-empty-dot" aria-hidden="true" />
+            {t.popup.bankNoSummary}
+          </div>
+        )}
+      </section>
+
+      <section className="popup-reveal popup-reveal--4">
+        {memory.entries.length === 0 ? (
+          <div className="popup-panel">
+            <div className="popup-empty-state">
+              <span className="popup-empty-dot" aria-hidden="true" />
+              {t.popup.bankEmpty}
+            </div>
+          </div>
+        ) : (
+          <div className="popup-bank-list">
+            {memory.entries.map(entry => {
+              const href = safeHttpUrl(entry.sourceUrl)
+              const linkLabel = entry.sourceTitle || entry.sourceUrl
+              return (
+                <article key={entry.id} className="popup-bank-entry">
+                  <div className="popup-bank-head">
+                    <h2 className="popup-bank-word">{entry.word}</h2>
+                    {entry.status !== 'ready' && (
+                      <span className="popup-bank-status" data-status={entry.status}>
+                        {entry.status === 'error' ? t.popup.bankError : t.popup.bankPending}
+                      </span>
+                    )}
+                  </div>
+                  {entry.ipa && <div className="popup-bank-ipa">{entry.ipa}</div>}
+                  {entry.translation && <div className="popup-bank-translation">{entry.translation}</div>}
+                  {entry.explanation && <div className="popup-bank-explanation">{entry.explanation}</div>}
+                  {entry.sourceSentence && <div className="popup-bank-sentence">{entry.sourceSentence}</div>}
+                  {href && linkLabel && (
+                    <a className="popup-bank-link" href={href} target="_blank" rel="noreferrer noopener">
+                      {t.popup.bankSource}: {linkLabel}
+                    </a>
+                  )}
+                  <div className="popup-bank-entry-actions">
+                    {(entry.status === 'error' || entry.status === 'pending') && (
+                      <button
+                        type="button"
+                        className="popup-action-secondary"
+                        onClick={() => void retryEntry(entry.id)}
+                        disabled={busyId === entry.id}
+                      >
+                        {t.popup.bankRetry}
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      className="popup-action-secondary"
+                      onClick={() => void removeEntry(entry.id)}
+                      disabled={busyId === entry.id}
+                    >
+                      {t.popup.bankDelete}
+                    </button>
+                  </div>
+                </article>
+              )
+            })}
+          </div>
+        )}
+      </section>
+    </div>
+  )
+}
+
 const Popup = () => {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG)
-  const [activeTab, setActiveTab] = useState<'translate' | 'settings'>('translate')
+  const [activeTab, setActiveTab] = useState<'translate' | 'bank' | 'settings'>('translate')
+  const [memory, setMemory] = useState<FloatorMemory>(emptyMemory())
   const [status, setStatus] = useState<string>('')
   
   // Translation State
@@ -74,6 +319,7 @@ const Popup = () => {
     ollama: t.popup.providerOllama,
   }
   const hasNeedOutput = needLoading || Boolean(needResult) || Boolean(needError)
+  const reviewDue = isReviewThresholdMet(memory)
   const isStatusError = status.includes('Failed') || status.includes('Error')
   const activeTargetLanguage = LANGUAGE_OPTIONS.find(option => option.value === needTargetLangCode)?.label ?? needTargetLangCode
 
@@ -93,6 +339,20 @@ const Popup = () => {
 
   useEffect(() => {
     getConfig().then(setConfig)
+  }, [])
+
+  useEffect(() => {
+    loadMemory()
+      .then(setMemory)
+      .catch(() => setMemory(emptyMemory()))
+
+    const onChanged = (changes: { [key: string]: chrome.storage.StorageChange }, areaName: string) => {
+      if (areaName !== 'local' || !Object.prototype.hasOwnProperty.call(changes, MEMORY_STORAGE_KEY)) return
+      setMemory(sanitizeMemory(changes[MEMORY_STORAGE_KEY]?.newValue))
+    }
+
+    chrome.storage.onChanged.addListener(onChanged)
+    return () => chrome.storage.onChanged.removeListener(onChanged)
   }, [])
 
   useEffect(() => {
@@ -238,7 +498,7 @@ const Popup = () => {
             <span className="popup-kicker">{providerLabelMap[config.activeApiProvider]}</span>
             <h1 className="popup-title">{t.popup.title}</h1>
             <p className="popup-subtitle">
-              {activeTab === 'translate' ? t.popup.inputPlaceholder : t.popup.apiConfigTitle}
+              {activeTab === 'translate' ? t.popup.inputPlaceholder : activeTab === 'bank' ? t.popup.bankSubtitle : t.popup.apiConfigTitle}
             </p>
           </div>
           <div className="popup-header-side">
@@ -260,6 +520,16 @@ const Popup = () => {
             {t.popup.tabTranslator}
           </button>
           <button
+            onClick={() => setActiveTab('bank')}
+            className="popup-tab"
+            data-active={activeTab === 'bank'}
+          >
+            <span className="popup-tab-label">
+              {t.popup.tabBank}
+              {reviewDue && <span className="popup-tab-badge">{memory.review.newSinceSummary}</span>}
+            </span>
+          </button>
+          <button
             onClick={() => setActiveTab('settings')}
             className="popup-tab"
             data-active={activeTab === 'settings'}
@@ -270,7 +540,7 @@ const Popup = () => {
       </div>
 
       <div className="popup-scroll">
-        {activeTab === 'translate' ? (
+        {activeTab === 'translate' && (
           <div className="popup-stack">
             <section className="popup-panel popup-panel--hero popup-reveal popup-reveal--2">
               <div className="popup-row">
@@ -366,7 +636,13 @@ const Popup = () => {
               </div>
             </section>
           </div>
-        ) : (
+        )}
+
+        {activeTab === 'bank' && (
+          <BankPanel memory={memory} interfaceLanguage={config.interfaceLanguage} t={t} />
+        )}
+
+        {activeTab === 'settings' && (
           <div className="popup-stack">
             <section className="popup-section popup-reveal popup-reveal--2">
               <h2 className="popup-section-title">{t.popup.preferencesTitle}</h2>
