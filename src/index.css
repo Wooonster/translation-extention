@@ -82,6 +82,29 @@
     transition: filter 220ms var(--ease-out);
   }
 
+  .popup-shell[data-tab='bank'] {
+    height: 600px;
+    min-height: 600px;
+    max-height: 600px;
+  }
+
+  .popup-shell[data-tab='bank'] .popup-bank-row {
+    padding-top: 8px;
+    padding-bottom: 8px;
+  }
+
+  .popup-bank-controls {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+
+  .popup-bank-controls .popup-lang-switch,
+  .popup-bank-controls .popup-provider-tabs {
+    width: 100%;
+    max-width: none;
+  }
+
   .popup-shell[data-tab='settings'] {
     --accent: var(--accent-alt);
     --accent-strong: var(--accent-alt-strong);

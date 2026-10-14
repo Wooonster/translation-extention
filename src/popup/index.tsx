@@ -499,6 +499,94 @@ function BankPanel({
   )
 }
 
+function LanguageControl({
+  userLanguage,
+  interfaceSide,
+  t,
+  onCommit,
+}: {
+  userLanguage: UserLanguage
+  interfaceSide: InterfaceSide
+  t: ReturnType<typeof getTranslation>
+  onCommit: (patch: { userLanguage?: UserLanguage; interfaceSide?: InterfaceSide }) => void
+}) {
+  return (
+    <div className="popup-lang-switch" role="radiogroup" aria-label={t.popup.userLanguage}>
+      <button
+        type="button"
+        className="popup-lang-option"
+        role="radio"
+        aria-checked={interfaceSide === 'en'}
+        aria-label={t.popup.interfaceEnglish}
+        title={t.popup.interfaceEnglish}
+        data-active={interfaceSide === 'en'}
+        onClick={() => onCommit({ interfaceSide: 'en' })}
+      >
+        En
+      </button>
+      <div className="popup-lang-user" data-active={interfaceSide === 'user'}>
+        <button
+          type="button"
+          className="popup-lang-option popup-lang-option--user"
+          role="radio"
+          aria-checked={interfaceSide === 'user'}
+          title={USER_LANGUAGE_ENDONYM[userLanguage]}
+          data-active="false"
+          onClick={() => onCommit({ interfaceSide: 'user' })}
+        >
+          {USER_LANGUAGE_ENDONYM[userLanguage]}
+        </button>
+        <label className="popup-lang-caret">
+          <select
+            aria-label={t.popup.userLanguagePick}
+            value={userLanguage}
+            onChange={event => {
+              const nextLanguage = event.target.value
+              if (!isUserLanguage(nextLanguage)) return
+              onCommit({ userLanguage: nextLanguage })
+            }}
+          >
+            {USER_LANGUAGES.map(value => (
+              <option key={value} value={value}>{USER_LANGUAGE_ENDONYM[value]}</option>
+            ))}
+          </select>
+          <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+            <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+          </svg>
+        </label>
+      </div>
+    </div>
+  )
+}
+
+function ProviderControl({
+  active,
+  labelFor,
+  onChange,
+}: {
+  active: ApiProvider
+  labelFor: (provider: ApiProvider) => string
+  onChange: (provider: ApiProvider) => void
+}) {
+  return (
+    <div className="popup-provider-tabs" role="radiogroup" aria-label="AI provider">
+      {API_PROVIDER_TABS.map(provider => (
+        <button
+          key={provider}
+          type="button"
+          role="radio"
+          aria-checked={active === provider}
+          onClick={() => onChange(provider)}
+          className="popup-provider-tab"
+          data-active={active === provider}
+        >
+          {labelFor(provider)}
+        </button>
+      ))}
+    </div>
+  )
+}
+
 const Popup = () => {
   const [config, setConfig] = useState<AppConfig>(DEFAULT_CONFIG)
   const [activeTab, setActiveTab] = useState<'translate' | 'bank' | 'settings'>('translate')
@@ -1202,7 +1290,22 @@ const Popup = () => {
         )}
 
         {activeTab === 'bank' && (
-          <BankPanel memory={memory} userLanguage={config.userLanguage} interfaceLanguage={interfaceLanguage} t={t} />
+          <div className="popup-stack">
+            <div className="popup-bank-controls">
+              <LanguageControl
+                userLanguage={config.userLanguage}
+                interfaceSide={config.interfaceSide}
+                t={t}
+                onCommit={patch => void commitLanguage(patch)}
+              />
+              <ProviderControl
+                active={config.activeApiProvider}
+                labelFor={provider => providerLabelMap[provider]}
+                onChange={handleProviderTabChange}
+              />
+            </div>
+            <BankPanel memory={memory} userLanguage={config.userLanguage} interfaceLanguage={interfaceLanguage} t={t} />
+          </div>
         )}
 
         {activeTab === 'settings' && (
@@ -1216,51 +1319,12 @@ const Popup = () => {
                     <span className="popup-setting-title">{t.popup.userLanguage}</span>
                     <span className="popup-setting-description">{t.popup.userLanguageDesc}</span>
                   </div>
-                  <div className="popup-lang-switch" role="radiogroup" aria-label={t.popup.userLanguage}>
-                    <button
-                      type="button"
-                      className="popup-lang-option"
-                      role="radio"
-                      aria-checked={config.interfaceSide === 'en'}
-                      aria-label={t.popup.interfaceEnglish}
-                      title={t.popup.interfaceEnglish}
-                      data-active={config.interfaceSide === 'en'}
-                      onClick={() => void commitLanguage({ interfaceSide: 'en' })}
-                    >
-                      En
-                    </button>
-                    <div className="popup-lang-user" data-active={config.interfaceSide === 'user'}>
-                      <button
-                        type="button"
-                        className="popup-lang-option popup-lang-option--user"
-                        role="radio"
-                        aria-checked={config.interfaceSide === 'user'}
-                        title={USER_LANGUAGE_ENDONYM[config.userLanguage]}
-                        data-active="false"
-                        onClick={() => void commitLanguage({ interfaceSide: 'user' })}
-                      >
-                        {USER_LANGUAGE_ENDONYM[config.userLanguage]}
-                      </button>
-                      <label className="popup-lang-caret">
-                        <select
-                          aria-label={t.popup.userLanguagePick}
-                          value={config.userLanguage}
-                          onChange={event => {
-                            const nextLanguage = event.target.value
-                            if (!isUserLanguage(nextLanguage)) return
-                            void commitLanguage({ userLanguage: nextLanguage })
-                          }}
-                        >
-                          {USER_LANGUAGES.map(value => (
-                            <option key={value} value={value}>{USER_LANGUAGE_ENDONYM[value]}</option>
-                          ))}
-                        </select>
-                        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
-                          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
-                        </svg>
-                      </label>
-                    </div>
-                  </div>
+                  <LanguageControl
+                    userLanguage={config.userLanguage}
+                    interfaceSide={config.interfaceSide}
+                    t={t}
+                    onCommit={patch => void commitLanguage(patch)}
+                  />
                 </div>
 
                 <div className="popup-setting-row">
@@ -1355,19 +1419,11 @@ const Popup = () => {
             <section className="popup-section popup-reveal popup-reveal--3">
               <h2 className="popup-section-title">{t.popup.apiConfigTitle}</h2>
 
-              <div className="popup-provider-tabs">
-                {API_PROVIDER_TABS.map(provider => (
-                  <button
-                    key={provider}
-                    type="button"
-                    onClick={() => handleProviderTabChange(provider)}
-                    className="popup-provider-tab"
-                    data-active={config.activeApiProvider === provider}
-                  >
-                    {providerLabelMap[provider]}
-                  </button>
-                ))}
-              </div>
+              <ProviderControl
+                active={config.activeApiProvider}
+                labelFor={provider => providerLabelMap[provider]}
+                onChange={handleProviderTabChange}
+              />
 
               <div className="popup-card">
                 <div className="popup-form">
