@@ -17,26 +17,26 @@ Floator may process the following data when you use the extension:
 - Authentication information:
   - API key you provide for your chosen AI endpoint.
 - Extension settings:
-  - API endpoint URL, model name, prompt, interface language, hover duration, keep-alive settings, and related preferences.
+  - API endpoint URL, model name, prompt, user language, hover duration, keep-alive settings, and related preferences.
 - Optional diagnostics:
   - If you enable debug logs, runtime status messages may appear in the console.
 - Vocabulary bank, stored on this device only:
   - Words you choose to save, the source sentence, the page URL, and the page title.
-  - Pronunciation, translation, explanation, and review summaries produced for those saved words.
+  - Pronunciation, an original-language gloss, a translation into the user language, an explanation, and review summaries produced for those saved words.
 
 ## How We Use Data
 We use this data only to:
 
 - Perform translation and follow-up requests you explicitly trigger.
 - Save vocabulary entries you explicitly add.
-- Request a pronunciation, translation, and short explanation only when you save a word, and a review summary only when you ask for one.
+- Request a pronunciation, an original-language gloss, a translation into your language, and a short explanation only when you save a word, and a review summary only when you ask for one.
 - Authenticate requests to your configured API endpoint.
 - Save your extension preferences.
 - Support optional debugging and model keep-alive behavior.
 
 ## Data Sharing and Third Parties
 Floator sends translation input data to the API endpoint you configure.
-When you save a word, Floator also sends that word and its source sentence so the API can return pronunciation, a translation, and a short explanation.
+When you save a word, Floator also sends that word and its source sentence so the API can return pronunciation, an original-language gloss, a translation into your language, and a short explanation.
 When you ask for a vocabulary summary, Floator sends recent saved entries to that API.
 Page URLs and titles in the vocabulary bank stay on the device and are not sent for enrichment or summary.
 This endpoint may be a local service (for example, LM Studio) or a third-party provider.

@@ -4,6 +4,8 @@ import ContentApp from './ContentApp'
 import styles from './content.css?inline'
 
 const init = () => {
+  if (!document.body) return
+
   // Create a host element for the shadow DOM
   const host = document.createElement('div')
   host.id = 'ai-translate-host'

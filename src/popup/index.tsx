@@ -1,21 +1,32 @@
 import React, { useEffect, useRef, useState } from 'react'
 import ReactDOM from 'react-dom/client'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
 import {
   DEFAULT_CONFIG,
   HOVER_DURATION_DEFAULT_MS,
   HOVER_DURATION_MAX_MS,
   HOVER_DURATION_MIN_MS,
+  USER_LANGUAGE_ENDONYM,
+  USER_LANGUAGES,
   getConfig,
+  interfaceLanguageFor,
+  isUserLanguage,
   saveConfig,
+  textDirectionFor,
   type ApiProvider,
   type AppConfig,
+  type InterfaceSide,
   type ProviderConfig,
+  type UserLanguage,
 } from '../lib/config'
-import { getTranslation } from '../lib/i18n'
+import { getLanguageName, getTranslation } from '../lib/i18n'
 import {
   MEMORY_STORAGE_KEY,
   emptyMemory,
   isReviewThresholdMet,
+  rankEntries,
+  shouldShowReviewNotice,
   loadMemory,
   sanitizeMemory,
   serializeMemory,
@@ -23,19 +34,111 @@ import {
 } from '../lib/memory'
 import '../index.css'
 
-const LANGUAGE_OPTIONS: Array<{ label: string; value: string }> = [
-  { label: 'English | 英语', value: 'en' },
-  { label: '中文 | 中文', value: 'zh' },
-  { label: 'Français | 法语', value: 'fr' },
-  { label: 'Deutsch | 德语', value: 'de' },
-  { label: 'Español | 西班牙语', value: 'es' },
-  { label: 'العربية | 阿拉伯语', value: 'ar' },
-  { label: 'हिन्दी | 印地语', value: 'hi' },
-  { label: 'Русский | 俄语', value: 'ru' },
-  { label: 'Português | 葡萄牙语', value: 'pt' },
-]
+const STAMP_LOCALE: Record<UserLanguage, string> = {
+  en: 'en',
+  zh: 'zh-CN',
+  fr: 'fr',
+  de: 'de',
+  es: 'es',
+  ar: 'ar',
+  hi: 'hi',
+  ru: 'ru',
+  pt: 'pt',
+}
+
+const languageChoiceLabel = (code: UserLanguage, interfaceLanguage: UserLanguage) => {
+  const endonym = USER_LANGUAGE_ENDONYM[code]
+  const localized = getLanguageName(code, interfaceLanguage)
+  return localized === endonym ? endonym : `${endonym} · ${localized}`
+}
 
 const API_PROVIDER_TABS: ApiProvider[] = ['lmApiServer', 'lmStudio', 'ollama']
+const POPUP_WORKSPACE_KEY = 'popupWorkspaceV1'
+const POPUP_WORKSPACE_TTL_MS = 10 * 60 * 1000
+
+interface PopupConversationTurn {
+  query: string
+  answer: string
+}
+
+interface PopupWorkspace {
+  needText: string
+  needTargetLangCode: string
+  needResult: string
+  needResultSourceText: string
+  needResultTargetLangCode: string
+  followupQuery: string
+  followupHistory: PopupConversationTurn[]
+  activeResultView: 'translation' | 'conversation'
+  useTranslationContext: boolean
+  targetOverridden: boolean
+}
+
+interface StoredPopupWorkspace extends PopupWorkspace {
+  expiresAt: number
+}
+
+const DEFAULT_POPUP_WORKSPACE: PopupWorkspace = {
+  needText: '',
+  needTargetLangCode: 'zh',
+  needResult: '',
+  needResultSourceText: '',
+  needResultTargetLangCode: 'zh',
+  followupQuery: '',
+  followupHistory: [],
+  activeResultView: 'translation',
+  useTranslationContext: false,
+  targetOverridden: false,
+}
+
+const sanitizePopupWorkspace = (raw: unknown, fallbackTarget: UserLanguage): PopupWorkspace => {
+  const workspace = typeof raw === 'object' && raw !== null ? raw as Partial<PopupWorkspace> : {}
+  const targetLanguageExists = isUserLanguage(workspace.needTargetLangCode)
+  const resultLanguageExists = isUserLanguage(workspace.needResultTargetLangCode)
+  const followupHistory = Array.isArray(workspace.followupHistory)
+    ? workspace.followupHistory
+        .filter(item => item && typeof item.query === 'string' && typeof item.answer === 'string')
+        .map(item => ({ query: item.query, answer: item.answer }))
+    : []
+
+  return {
+    needText: typeof workspace.needText === 'string' ? workspace.needText : '',
+    needTargetLangCode: targetLanguageExists ? workspace.needTargetLangCode! : fallbackTarget,
+    needResult: typeof workspace.needResult === 'string' ? workspace.needResult : '',
+    needResultSourceText: typeof workspace.needResultSourceText === 'string' ? workspace.needResultSourceText : '',
+    needResultTargetLangCode: resultLanguageExists ? workspace.needResultTargetLangCode! : fallbackTarget,
+    followupQuery: typeof workspace.followupQuery === 'string' ? workspace.followupQuery : '',
+    followupHistory,
+    activeResultView: workspace.activeResultView === 'conversation' ? 'conversation' : 'translation',
+    useTranslationContext: workspace.useTranslationContext === true && Boolean(workspace.needResult),
+    targetOverridden: workspace.targetOverridden === true,
+  }
+}
+
+const getFreshPopupWorkspace = (raw: unknown, fallbackTarget: UserLanguage): PopupWorkspace | null => {
+  if (typeof raw !== 'object' || raw === null) return null
+  const expiresAt = (raw as Partial<StoredPopupWorkspace>).expiresAt
+  if (typeof expiresAt !== 'number' || !Number.isFinite(expiresAt) || expiresAt <= Date.now()) return null
+  return sanitizePopupWorkspace(raw, fallbackTarget)
+}
+
+const copyTextToClipboard = async (text: string): Promise<boolean> => {
+  try {
+    await navigator.clipboard.writeText(text)
+    return true
+  } catch {}
+
+  const el = document.createElement('textarea')
+  el.value = text
+  el.setAttribute('readonly', 'true')
+  el.style.position = 'fixed'
+  el.style.left = '-9999px'
+  document.body.appendChild(el)
+  el.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(el)
+  return ok
+}
 
 const API_PROVIDER_PLACEHOLDERS: Record<ApiProvider, { endpoint: string; apiKey: string; modelName: string }> = {
   lmApiServer: {
@@ -65,63 +168,85 @@ function safeHttpUrl(value: string): string | null {
   return null
 }
 
-function formatStamp(iso: string, lang: 'en' | 'zh'): string {
+function markdownText(value: string): string {
+  return value.replace(/[\\`*_{}[\]()#+\-!|>]/g, match => `\\${match}`)
+}
+
+function pronunciation(ipa: string): string {
+  const bare = ipa.trim().replace(/^\/+|\/+$/g, '')
+  return bare ? `/${bare}/` : ''
+}
+
+function markdownLink(label: string, href: string): string {
+  return `[${markdownText(label)}](${href.replace(/\)/g, '%29')})`
+}
+
+function buildReviewMarkdown(input: {
+  title: string
+  date: string
+  memoryHeading: string
+  originalLabel: string
+  userLabel: string
+  summary: NonNullable<FloatorMemory['review']['latestSummary']>
+  entries: FloatorMemory['entries']
+}): string {
+  const byId = new Map(input.entries.map(entry => [entry.id, entry]))
+  const sections = input.summary.entryIds.flatMap(id => {
+    const entry = byId.get(id)
+    if (!entry) return []
+    const lines = [`## ${markdownText(entry.word)}`, '']
+    const spoken = pronunciation(entry.ipa)
+    if (spoken) lines.push(markdownText(spoken), '')
+    if (entry.partOfSpeech) lines.push(markdownText(entry.partOfSpeech), '')
+    if (entry.translation) lines.push(`**${markdownText(input.originalLabel)}**`, '', markdownText(entry.translation), '')
+    if (entry.userTranslation) lines.push(`**${markdownText(input.userLabel)}**`, '', markdownText(entry.userTranslation), '')
+    if (entry.sourceSentence) lines.push(`> ${markdownText(entry.sourceSentence).replace(/\n/g, '\n> ')}`, '')
+    const links = (entry.sources ?? []).flatMap(source => {
+      const href = safeHttpUrl(source.url)
+      if (!href) return []
+      return [markdownLink(source.title || source.url, href)]
+    })
+    if (links.length) lines.push(links.map(link => `- ${link}`).join('\n'), '')
+    return [lines.join('\n').trim()]
+  })
+
+  const parts = [`# ${markdownText(input.title)}`, '', input.date]
+  if (sections.length) parts.push('', sections.join('\n\n'))
+  parts.push('', '---', '', `## ${markdownText(input.memoryHeading)}`, '', input.summary.text.trim(), '')
+  return parts.join('\n')
+}
+
+function formatStamp(iso: string, lang: UserLanguage): string {
   const time = Date.parse(iso)
   if (!Number.isFinite(time)) return ''
-  return new Date(time).toLocaleString(lang === 'zh' ? 'zh-CN' : 'en')
+  return new Date(time).toLocaleString(STAMP_LOCALE[lang])
 }
 
 function BankPanel({
   memory,
+  userLanguage,
   interfaceLanguage,
   t,
 }: {
   memory: FloatorMemory
-  interfaceLanguage: 'en' | 'zh'
+  userLanguage: UserLanguage
+  interfaceLanguage: UserLanguage
   t: ReturnType<typeof getTranslation>
 }) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [summaryBusy, setSummaryBusy] = useState(false)
-  const [copied, setCopied] = useState(false)
+  const [clearingSummary, setClearingSummary] = useState(false)
   const [message, setMessage] = useState('')
-
+  const [summaryExpanded, setSummaryExpanded] = useState(false)
+  const [askedVisible, setAskedVisible] = useState(false)
+  const [sessionHidden, setSessionHidden] = useState(false)
+  const summaryEpisode = memory.review.oldestUnreviewedAt
+  const episodeRef = useRef(summaryEpisode)
   useEffect(() => {
-    if (!copied) return
-    const timer = window.setTimeout(() => setCopied(false), 1500)
-    return () => window.clearTimeout(timer)
-  }, [copied])
-
-  const copyJson = async () => {
-    const text = serializeMemory(memory)
-    try {
-      await navigator.clipboard.writeText(text)
-      setCopied(true)
-      setMessage('')
-      return
-    } catch {
-      // Clipboard can be blocked in the popup. Fall back to a hidden textarea.
-    }
-
-    try {
-      const el = document.createElement('textarea')
-      el.value = text
-      el.setAttribute('readonly', 'true')
-      el.style.position = 'fixed'
-      el.style.left = '-9999px'
-      document.body.appendChild(el)
-      el.select()
-      const ok = document.execCommand('copy')
-      document.body.removeChild(el)
-      if (ok) {
-        setCopied(true)
-        setMessage('')
-        return
-      }
-    } catch {
-      // Leave the message below.
-    }
-    setMessage(t.popup.bankCopyFailed)
-  }
+    if (episodeRef.current === summaryEpisode) return
+    episodeRef.current = summaryEpisode
+    setSessionHidden(false)
+  }, [summaryEpisode])
 
   const downloadJson = () => {
     const blob = new Blob([serializeMemory(memory)], { type: 'application/json' })
@@ -135,13 +260,36 @@ function BankPanel({
     window.setTimeout(() => URL.revokeObjectURL(url), 1000)
   }
 
+  const downloadSummaryMarkdown = (summary: FloatorMemory['review']['latestSummary']) => {
+    if (!summary) return
+    const markdown = buildReviewMarkdown({
+      title: t.popup.bankReviewTitle,
+      date: formatStamp(summary.createdAt, interfaceLanguage),
+      memoryHeading: t.popup.bankReviewMemory,
+      originalLabel: t.popup.bankOriginalMeaning,
+      userLabel: t.popup.bankUserMeaning,
+      summary,
+      entries: memory.entries,
+    })
+    const day = summary.createdAt.slice(0, 10).replace(/[^\d-]/g, '') || 'review'
+    const blob = new Blob([markdown], { type: 'text/markdown;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = `floator-review-${day}.md`
+    document.body.appendChild(link)
+    link.click()
+    link.remove()
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   const retryEntry = async (id: string) => {
     setBusyId(id)
     setMessage('')
     try {
       const response = await chrome.runtime.sendMessage({
         action: 'ENRICH_VOCAB',
-        payload: { id, interfaceLanguage },
+        payload: { id, userLanguage },
       })
       if (response?.status !== 'success') setMessage(response?.error || t.popup.bankError)
     } catch (error: unknown) {
@@ -177,9 +325,14 @@ function BankPanel({
     try {
       const response = await chrome.runtime.sendMessage({
         action: 'SUMMARIZE_VOCAB',
-        payload: { interfaceLanguage },
+        payload: { userLanguage },
       })
       if (response?.status !== 'success') setMessage(response?.error || t.popup.bankSummaryFailed)
+      else {
+        setAskedVisible(true)
+        setSessionHidden(false)
+        setSummaryExpanded(true)
+      }
     } catch (error: unknown) {
       setMessage(error instanceof Error ? error.message : t.popup.bankSummaryFailed)
     } finally {
@@ -187,105 +340,161 @@ function BankPanel({
     }
   }
 
+  const deleteSummary = async () => {
+    if (!memory.review.latestSummary) return
+    setClearingSummary(true)
+    setMessage('')
+    try {
+      const response = await chrome.runtime.sendMessage({ action: 'CLEAR_VOCAB_SUMMARY' })
+      if (response?.status !== 'success') setMessage(response?.error || t.popup.bankDeleteSummaryFailed)
+    } catch (error: unknown) {
+      setMessage(error instanceof Error ? error.message : t.popup.bankDeleteSummaryFailed)
+    } finally {
+      setClearingSummary(false)
+    }
+  }
+
   const summary = memory.review.latestSummary
   const summaryWhen = summary ? formatStamp(summary.createdAt, interfaceLanguage) : ''
+  const summaryLocked = summaryBusy || clearingSummary
+  const reminderDue = shouldShowReviewNotice(memory)
+  const dismissedEpisode = Boolean(summaryEpisode && memory.review.summaryDismissedFor === summaryEpisode)
+  const showSummary = Boolean(summary) && !sessionHidden && (askedVisible || (reminderDue && !dismissedEpisode))
+
+  const dismissSummary = async () => {
+    setSessionHidden(true)
+    setAskedVisible(false)
+    setSummaryExpanded(false)
+    try {
+      await chrome.runtime.sendMessage({ action: 'DISMISS_VOCAB_SUMMARY' })
+    } catch {
+      setMessage(t.popup.bankSummaryDismiss)
+    }
+  }
+
+  const ranked = rankEntries(memory.entries)
 
   return (
-    <div className="popup-stack">
-      <section className="popup-panel popup-reveal popup-reveal--2">
-        <div className="popup-bank-head">
-          <div>
-            <div className="popup-caption">{t.popup.tabBank}</div>
-            <div className="popup-result-label">{t.popup.bankSavedCount.replace('{count}', String(memory.entries.length))}</div>
-          </div>
-        </div>
-        <div className="popup-bank-toolbar mt-3">
-          <button type="button" className="popup-action-primary" onClick={() => void summarize()} disabled={summaryBusy}>
+    <div className="popup-bank">
+      <header className="popup-bank-overview">
+        <h2 className="popup-bank-count">{t.popup.bankSavedCount.replace('{count}', String(ranked.length))}</h2>
+        <div className="popup-bank-toolbar">
+          <button type="button" className="popup-action-primary" onClick={() => void summarize()} disabled={summaryLocked}>
             {summaryBusy ? t.popup.bankSummarizing : t.popup.bankSummarize}
-          </button>
-          <button type="button" className="popup-action-secondary" onClick={() => void copyJson()}>
-            {copied ? t.popup.bankCopied : t.popup.bankCopyJson}
           </button>
           <button type="button" className="popup-action-secondary" onClick={downloadJson}>
             {t.popup.bankDownload}
           </button>
         </div>
-        {message && <p className="popup-helper popup-error mt-3">{message}</p>}
-      </section>
+      </header>
+      {message && <p className="popup-bank-message">{message}</p>}
 
-      <section className="popup-panel popup-reveal popup-reveal--3">
-        <div className="popup-caption">{t.popup.bankSummaryTitle}</div>
-        {summary ? (
-          <>
-            {summaryWhen && <div className="popup-helper mt-2">{summaryWhen}</div>}
-            <div className="popup-bank-summary mt-2">{summary.text}</div>
-          </>
-        ) : (
-          <div className="popup-empty-state">
-            <span className="popup-empty-dot" aria-hidden="true" />
-            {t.popup.bankNoSummary}
-          </div>
-        )}
-      </section>
-
-      <section className="popup-reveal popup-reveal--4">
-        {memory.entries.length === 0 ? (
-          <div className="popup-panel">
-            <div className="popup-empty-state">
-              <span className="popup-empty-dot" aria-hidden="true" />
-              {t.popup.bankEmpty}
+      {showSummary && summary && (
+        <div className="popup-bank-reminder">
+          <button
+            type="button"
+            className="popup-bank-reminder-line"
+            aria-expanded={summaryExpanded}
+            onClick={() => setSummaryExpanded(open => !open)}
+          >
+            <span>{t.popup.bankSummaryRemind}</span>
+            {summaryWhen && <time dateTime={summary.createdAt}>{summaryWhen}</time>}
+          </button>
+          <span className="popup-bank-reminder-actions">
+            <button type="button" className="popup-action-secondary popup-bank-mini" onClick={() => downloadSummaryMarkdown(summary)}>
+              {t.popup.bankSummaryMarkdown}
+            </button>
+            <button type="button" className="popup-bank-quiet" onClick={() => void dismissSummary()}>
+              {t.popup.bankSummaryDismiss}
+            </button>
+          </span>
+          {summaryExpanded && (
+            <div className="popup-bank-reminder-body">
+              <div className="popup-bank-summary">{summary.text}</div>
+              <button
+                type="button"
+                className="popup-bank-quiet"
+                onClick={() => void deleteSummary()}
+                disabled={summaryLocked}
+              >
+                {t.popup.bankDeleteSummary}
+              </button>
             </div>
-          </div>
-        ) : (
-          <div className="popup-bank-list">
-            {memory.entries.map(entry => {
-              const href = safeHttpUrl(entry.sourceUrl)
-              const linkLabel = entry.sourceTitle || entry.sourceUrl
-              return (
-                <article key={entry.id} className="popup-bank-entry">
-                  <div className="popup-bank-head">
-                    <h2 className="popup-bank-word">{entry.word}</h2>
-                    {entry.status !== 'ready' && (
-                      <span className="popup-bank-status" data-status={entry.status}>
-                        {entry.status === 'error' ? t.popup.bankError : t.popup.bankPending}
-                      </span>
-                    )}
-                  </div>
-                  {entry.ipa && <div className="popup-bank-ipa">{entry.ipa}</div>}
-                  {entry.translation && <div className="popup-bank-translation">{entry.translation}</div>}
-                  {entry.explanation && <div className="popup-bank-explanation">{entry.explanation}</div>}
-                  {entry.sourceSentence && <div className="popup-bank-sentence">{entry.sourceSentence}</div>}
-                  {href && linkLabel && (
-                    <a className="popup-bank-link" href={href} target="_blank" rel="noreferrer noopener">
-                      {t.popup.bankSource}: {linkLabel}
-                    </a>
-                  )}
-                  <div className="popup-bank-entry-actions">
-                    {(entry.status === 'error' || entry.status === 'pending') && (
-                      <button
-                        type="button"
-                        className="popup-action-secondary"
-                        onClick={() => void retryEntry(entry.id)}
-                        disabled={busyId === entry.id}
-                      >
-                        {t.popup.bankRetry}
-                      </button>
-                    )}
-                    <button
-                      type="button"
-                      className="popup-action-secondary"
-                      onClick={() => void removeEntry(entry.id)}
-                      disabled={busyId === entry.id}
-                    >
-                      {t.popup.bankDelete}
-                    </button>
-                  </div>
-                </article>
-              )
-            })}
-          </div>
-        )}
-      </section>
+          )}
+        </div>
+      )}
+
+      {ranked.length === 0 ? (
+        <p className="popup-bank-empty">{t.popup.bankEmpty}</p>
+      ) : (
+        <ol className="popup-bank-list">
+          {ranked.map(entry => (
+            <li key={entry.id} className="popup-bank-row">
+              <div className="popup-bank-row-title">
+                <h3 className="popup-bank-word">
+                  {entry.word}
+                  {pronunciation(entry.ipa) ? <span className="popup-bank-ipa">{pronunciation(entry.ipa)}</span> : null}
+                  {entry.partOfSpeech ? <span className="popup-bank-pos">{entry.partOfSpeech}</span> : null}
+                </h3>
+                <span className="popup-bank-times">{t.popup.bankAddCount.replace('{count}', String(entry.addCount || 1))}</span>
+                {entry.status !== 'ready' && (
+                  <span className="popup-bank-status" data-status={entry.status}>
+                    {entry.status === 'error' ? t.popup.bankError : t.popup.bankPending}
+                  </span>
+                )}
+              </div>
+              <p className="popup-bank-meaning">
+                <span>{t.popup.bankOriginalMeaning}</span>
+                {entry.translation || '—'}
+              </p>
+              <p className="popup-bank-meaning popup-bank-meaning--user">
+                <span>{t.popup.bankUserMeaning}</span>
+                {entry.userTranslation || '—'}
+              </p>
+              {(entry.sources ?? []).length > 0 && (
+                <ul className="popup-bank-sources">
+                  {(entry.sources ?? []).map((source, index) => {
+                    const href = safeHttpUrl(source.url)
+                    const label = source.title || source.url
+                    return (
+                      <li key={`${source.url}|${source.addedAt}|${index}`}>
+                        {href && label ? (
+                          <a className="popup-bank-link" href={href} target="_blank" rel="noreferrer noopener">
+                            {label}
+                          </a>
+                        ) : null}
+                        {source.sentence && source.sentence !== label && (
+                          <span className="popup-bank-sentence">{source.sentence}</span>
+                        )}
+                      </li>
+                    )
+                  })}
+                </ul>
+              )}
+              <div className="popup-bank-row-actions">
+                {(entry.status === 'error' || entry.status === 'pending') && (
+                  <button
+                    type="button"
+                    className="popup-bank-quiet"
+                    onClick={() => void retryEntry(entry.id)}
+                    disabled={busyId === entry.id}
+                  >
+                    {t.popup.bankRetry}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="popup-bank-quiet"
+                  onClick={() => void removeEntry(entry.id)}
+                  disabled={busyId === entry.id}
+                >
+                  {t.popup.bankDelete}
+                </button>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   )
 }
@@ -297,19 +506,39 @@ const Popup = () => {
   const [status, setStatus] = useState<string>('')
   
   // Translation State
-  const [needText, setNeedText] = useState('')
-  const [needTargetLangCode, setNeedTargetLangCode] = useState('en')
+  const [needText, setNeedText] = useState(DEFAULT_POPUP_WORKSPACE.needText)
+  const [needTargetLangCode, setNeedTargetLangCode] = useState(DEFAULT_POPUP_WORKSPACE.needTargetLangCode)
   const [needResult, setNeedResult] = useState('')
+  const [needResultSourceText, setNeedResultSourceText] = useState('')
+  const [needResultTargetLangCode, setNeedResultTargetLangCode] = useState(DEFAULT_POPUP_WORKSPACE.needResultTargetLangCode)
   const [needError, setNeedError] = useState('')
   const [needLoading, setNeedLoading] = useState(false)
   const [needCopied, setNeedCopied] = useState(false)
   const [needAttempt, setNeedAttempt] = useState(0)
+  const [workspaceLoaded, setWorkspaceLoaded] = useState(false)
+  const [activeResultView, setActiveResultView] = useState<PopupWorkspace['activeResultView']>('translation')
+  const [followupQuery, setFollowupQuery] = useState('')
+  const [pendingFollowupQuery, setPendingFollowupQuery] = useState('')
+  const [followupHistory, setFollowupHistory] = useState<PopupConversationTurn[]>([])
+  const [followupLoading, setFollowupLoading] = useState(false)
+  const [followupError, setFollowupError] = useState('')
+  const [copiedTurnIndex, setCopiedTurnIndex] = useState<number | null>(null)
+  const [useTranslationContext, setUseTranslationContext] = useState(false)
   const needTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const followupTextareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const conversationRef = useRef<HTMLDivElement | null>(null)
+  const composingRef = useRef(false)
+  const followupInFlightRef = useRef(false)
+  const persistenceTimerRef = useRef<number | null>(null)
+  const skipNextPersistenceRef = useRef(false)
+  const targetOverrideRef = useRef(false)
 
   // Settings State
   const [loading, setLoading] = useState(false)
 
-  const t = getTranslation(config.interfaceLanguage)
+  const interfaceLanguage = interfaceLanguageFor(config.userLanguage, config.interfaceSide)
+  const direction = textDirectionFor(interfaceLanguage)
+  const t = getTranslation(interfaceLanguage)
   const activeProviderConfig: ProviderConfig = config.providers[config.activeApiProvider]
   const activePlaceholders = API_PROVIDER_PLACEHOLDERS[config.activeApiProvider]
 
@@ -321,7 +550,10 @@ const Popup = () => {
   const hasNeedOutput = needLoading || Boolean(needResult) || Boolean(needError)
   const reviewDue = isReviewThresholdMet(memory)
   const isStatusError = status.includes('Failed') || status.includes('Error')
-  const activeTargetLanguage = LANGUAGE_OPTIONS.find(option => option.value === needTargetLangCode)?.label ?? needTargetLangCode
+  const activeTargetLanguage = isUserLanguage(needResultTargetLangCode)
+    ? languageChoiceLabel(needResultTargetLangCode, interfaceLanguage)
+    : needResultTargetLangCode
+  const canAskFollowup = !needLoading && !followupLoading
 
   const normalizeHoverDuration = (value: number) => {
     if (!Number.isFinite(value)) return HOVER_DURATION_DEFAULT_MS
@@ -338,7 +570,43 @@ const Popup = () => {
   }
 
   useEffect(() => {
-    getConfig().then(setConfig)
+    let cancelled = false
+    Promise.all([
+      getConfig(),
+      chrome.storage.local.get(POPUP_WORKSPACE_KEY).catch(() => ({}) as Record<string, unknown>),
+    ])
+      .then(([cfg, result]) => {
+        if (cancelled) return
+        setConfig(cfg)
+        const storedWorkspace = result[POPUP_WORKSPACE_KEY]
+        const fresh = getFreshPopupWorkspace(storedWorkspace, cfg.userLanguage)
+        if (storedWorkspace !== undefined && !fresh) {
+          chrome.storage.local.remove(POPUP_WORKSPACE_KEY).catch(() => {})
+        }
+        const workspace = fresh ?? {
+          ...DEFAULT_POPUP_WORKSPACE,
+          needTargetLangCode: cfg.userLanguage,
+          needResultTargetLangCode: cfg.userLanguage,
+        }
+        const targetOverridden = workspace.targetOverridden
+        targetOverrideRef.current = targetOverridden
+        setNeedText(workspace.needText)
+        setNeedTargetLangCode(targetOverridden ? workspace.needTargetLangCode : cfg.userLanguage)
+        setNeedResult(workspace.needResult)
+        setNeedResultSourceText(workspace.needResultSourceText)
+        setNeedResultTargetLangCode(workspace.needResultTargetLangCode)
+        setFollowupQuery(workspace.followupQuery)
+        setFollowupHistory(workspace.followupHistory)
+        setActiveResultView(workspace.activeResultView)
+        setUseTranslationContext(workspace.useTranslationContext)
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (!cancelled) setWorkspaceLoaded(true)
+      })
+    return () => {
+      cancelled = true
+    }
   }, [])
 
   useEffect(() => {
@@ -356,8 +624,52 @@ const Popup = () => {
   }, [])
 
   useEffect(() => {
+    if (!workspaceLoaded) return
+    if (skipNextPersistenceRef.current) {
+      skipNextPersistenceRef.current = false
+      return
+    }
+    persistenceTimerRef.current = window.setTimeout(() => {
+      const workspace: StoredPopupWorkspace = {
+        needText,
+        needTargetLangCode,
+        needResult,
+        needResultSourceText,
+        needResultTargetLangCode,
+        followupQuery,
+        followupHistory,
+        activeResultView,
+        useTranslationContext,
+        targetOverridden: targetOverrideRef.current,
+        expiresAt: Date.now() + POPUP_WORKSPACE_TTL_MS,
+      }
+      chrome.storage.local.set({ [POPUP_WORKSPACE_KEY]: workspace }).catch(() => {})
+      persistenceTimerRef.current = null
+    }, 120)
+    return () => {
+      if (persistenceTimerRef.current !== null) {
+        window.clearTimeout(persistenceTimerRef.current)
+        persistenceTimerRef.current = null
+      }
+    }
+  }, [
+    activeResultView,
+    followupHistory,
+    followupQuery,
+    needResult,
+    needResultSourceText,
+    needResultTargetLangCode,
+    needTargetLangCode,
+    needText,
+    useTranslationContext,
+    workspaceLoaded,
+  ])
+
+  useEffect(() => {
     document.title = t.popup.title
-  }, [t.popup.title])
+    document.documentElement.lang = interfaceLanguage
+    document.documentElement.dir = direction
+  }, [direction, interfaceLanguage, t.popup.title])
 
   useEffect(() => {
     setNeedAttempt(0)
@@ -372,6 +684,12 @@ const Popup = () => {
     el.style.height = `${Math.max(80, next)}px`
     el.style.overflowY = el.scrollHeight > maxHeightPx ? 'auto' : 'hidden'
   }, [needText, activeTab])
+
+  useEffect(() => {
+    if (activeResultView !== 'conversation') return
+    const el = conversationRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [activeResultView, followupHistory, followupLoading])
 
   const handleSave = async () => {
     await saveConfig(config)
@@ -406,6 +724,17 @@ const Popup = () => {
   const handleToggleFloatingStreamEnabled = async () => {
     const nextConfig = { ...config, floatingStreamEnabled: !config.floatingStreamEnabled }
     setConfig(nextConfig)
+    await saveConfig(nextConfig)
+  }
+
+  const commitLanguage = async (patch: { userLanguage?: UserLanguage; interfaceSide?: InterfaceSide }) => {
+    const nextLanguage = patch.userLanguage ?? config.userLanguage
+    const nextConfig = { ...config, ...patch, userLanguage: nextLanguage }
+    setConfig(nextConfig)
+    if (patch.userLanguage && patch.userLanguage !== config.userLanguage && !targetOverrideRef.current) {
+      setNeedTargetLangCode(patch.userLanguage)
+      if (!needResult.trim()) setNeedResultTargetLangCode(patch.userLanguage)
+    }
     await saveConfig(nextConfig)
   }
 
@@ -445,6 +774,9 @@ const Popup = () => {
     setNeedLoading(true)
     setNeedCopied(false)
     setNeedError('')
+    setFollowupError('')
+    setActiveResultView('translation')
+    setNeedResult('')
     
     try {
       const response = await chrome.runtime.sendMessage({
@@ -454,6 +786,11 @@ const Popup = () => {
 
       if (response.status === 'success') {
         setNeedResult(extractTranslateText(response.data))
+        setNeedResultSourceText(text)
+        setNeedResultTargetLangCode(needTargetLangCode)
+        setFollowupQuery('')
+        setPendingFollowupQuery('')
+        setFollowupHistory([])
       } else {
         setNeedError(response.error || 'Unknown error')
       }
@@ -468,30 +805,94 @@ const Popup = () => {
     const text = needResult.trim()
     if (!text) return
 
-    try {
-      await navigator.clipboard.writeText(text)
-      setNeedCopied(true)
-      setTimeout(() => setNeedCopied(false), 1500)
-      return
-    } catch {}
-
-    const el = document.createElement('textarea')
-    el.value = text
-    el.setAttribute('readonly', 'true')
-    el.style.position = 'fixed'
-    el.style.left = '-9999px'
-    document.body.appendChild(el)
-    el.select()
-    const ok = document.execCommand('copy')
-    document.body.removeChild(el)
-    if (ok) {
+    if (await copyTextToClipboard(text)) {
       setNeedCopied(true)
       setTimeout(() => setNeedCopied(false), 1500)
     }
   }
 
+  const openFollowup = (withTranslationContext = false) => {
+    setFollowupError('')
+    setUseTranslationContext(withTranslationContext && Boolean(needResult.trim() && needResultSourceText.trim()))
+    setActiveResultView('conversation')
+    window.requestAnimationFrame(() => followupTextareaRef.current?.focus())
+  }
+
+  const openDirectConversation = () => openFollowup(false)
+
+  const handleNeedFollowup = async () => {
+    const draft = followupQuery
+    const query = draft.trim()
+    if (followupInFlightRef.current || !query || !canAskFollowup) return
+
+    followupInFlightRef.current = true
+    setFollowupLoading(true)
+    setFollowupError('')
+    setCopiedTurnIndex(null)
+    setPendingFollowupQuery(query)
+    setFollowupQuery('')
+    try {
+      const response = await chrome.runtime.sendMessage({
+        action: 'FOLLOWUP',
+        payload: {
+          query,
+          sourceText: useTranslationContext ? needResultSourceText : '',
+          translatedText: useTranslationContext ? needResult : '',
+          history: followupHistory,
+        },
+      })
+
+      if (response?.status !== 'success') {
+        throw new Error(response?.error || 'Interaction failed')
+      }
+
+      setFollowupHistory(prev => [...prev, { query, answer: String(response.data || '') }])
+    } catch (error) {
+      setFollowupQuery(draft)
+      setFollowupError(error instanceof Error ? error.message : 'Interaction failed')
+    } finally {
+      followupInFlightRef.current = false
+      setPendingFollowupQuery('')
+      setFollowupLoading(false)
+    }
+  }
+
+  const handleCopyTurn = async (answer: string, index: number) => {
+    if (!answer.trim()) return
+    if (await copyTextToClipboard(answer.trim())) {
+      setCopiedTurnIndex(index)
+      window.setTimeout(() => setCopiedTurnIndex(current => current === index ? null : current), 1500)
+    }
+  }
+
+  const handleClearWorkspace = () => {
+    if (needLoading || followupLoading) return
+    if (persistenceTimerRef.current !== null) {
+      window.clearTimeout(persistenceTimerRef.current)
+      persistenceTimerRef.current = null
+    }
+    skipNextPersistenceRef.current = true
+    targetOverrideRef.current = false
+    setNeedText(DEFAULT_POPUP_WORKSPACE.needText)
+    setNeedTargetLangCode(config.userLanguage)
+    setNeedResult(DEFAULT_POPUP_WORKSPACE.needResult)
+    setNeedResultSourceText(DEFAULT_POPUP_WORKSPACE.needResultSourceText)
+    setNeedResultTargetLangCode(config.userLanguage)
+    setFollowupQuery(DEFAULT_POPUP_WORKSPACE.followupQuery)
+    setPendingFollowupQuery('')
+    setFollowupHistory([])
+    setActiveResultView(DEFAULT_POPUP_WORKSPACE.activeResultView)
+    setUseTranslationContext(DEFAULT_POPUP_WORKSPACE.useTranslationContext)
+    setNeedError('')
+    setFollowupError('')
+    setNeedCopied(false)
+    setCopiedTurnIndex(null)
+    setNeedAttempt(0)
+    chrome.storage.local.remove(POPUP_WORKSPACE_KEY).catch(() => {})
+  }
+
   return (
-    <div className="popup-shell" data-tab={activeTab} data-loading={needLoading ? 'true' : 'false'}>
+    <div className="popup-shell" dir={direction} lang={interfaceLanguage} data-tab={activeTab} data-loading={needLoading ? 'true' : 'false'}>
       <div className="popup-topbar popup-reveal popup-reveal--1">
         <div className="popup-header">
           <div>
@@ -502,7 +903,7 @@ const Popup = () => {
             </p>
           </div>
           <div className="popup-header-side">
-            <span className="popup-chip">{config.interfaceLanguage.toUpperCase()}</span>
+            <span className="popup-chip">{config.userLanguage.toUpperCase()}</span>
             {status && (
               <span className="popup-status" data-tone={isStatusError ? 'error' : 'success'}>
                 {status}
@@ -542,104 +943,266 @@ const Popup = () => {
       <div className="popup-scroll">
         {activeTab === 'translate' && (
           <div className="popup-stack">
-            <section className="popup-panel popup-panel--hero popup-reveal popup-reveal--2">
-              <div className="popup-row">
-                <span className="popup-caption">{t.popup.toLabel}</span>
-                <select
-                  className="popup-select max-w-[190px]"
-                  value={needTargetLangCode}
-                  onChange={e => setNeedTargetLangCode(e.target.value)}
-                >
-                  {LANGUAGE_OPTIONS.map(opt => (
-                    <option key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <textarea
-                ref={needTextareaRef}
-                className="popup-textarea"
-                placeholder={t.popup.inputPlaceholder}
-                value={needText}
-                onChange={e => setNeedText(e.target.value)}
-                onKeyDown={e => {
-                  if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') handleNeedTranslate()
-                }}
-              />
-
-              <div className="popup-panel-actions mt-4">
-                <span className="popup-helper">Ctrl/Cmd + Enter</span>
-                <button
-                  type="button"
-                  onClick={handleNeedTranslate}
-                  disabled={needLoading || !needText.trim()}
-                  className="popup-action-primary"
-                >
-                  {needLoading ? (
-                    <>
-                      <div className="popup-spinner" />
-                      <span>{t.popup.transLoading}</span>
-                    </>
-                  ) : (
-                    t.popup.transButton
-                  )}
-                </button>
-              </div>
-
-            </section>
-
-            <section className="popup-panel popup-panel--result popup-reveal popup-reveal--3">
-              <div className="popup-result-card">
-                <div className="popup-result-header">
-                  <div>
-                    <div className="popup-caption">{t.popup.tabTranslator}</div>
-                    <div className="popup-result-label">{activeTargetLanguage}</div>
-                  </div>
-
-                  {needResult && !needLoading && !needError && (
-                    <button
-                      type="button"
-                      onClick={handleNeedCopy}
-                      className={`popup-icon-button ${needCopied ? 'is-copied' : ''}`}
-                      title={t.popup.copyTitle}
-                    >
-                      {needCopied ? (
-                        <svg className="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
-                        </svg>
-                      ) : (
-                        <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
-                        </svg>
-                      )}
-                    </button>
-                  )}
+            <section className="popup-panel popup-panel--workspace popup-reveal popup-reveal--2" data-mode={activeResultView}>
+              <div className="popup-workspace-toolbar">
+                <div className="popup-workspace-modes" role="tablist">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeResultView === 'translation'}
+                    data-active={activeResultView === 'translation'}
+                    onClick={() => setActiveResultView('translation')}
+                  >
+                    {t.popup.resultTab}
+                  </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeResultView === 'conversation'}
+                    data-active={activeResultView === 'conversation'}
+                    onClick={openDirectConversation}
+                  >
+                    {t.popup.conversationTab}
+                    {followupHistory.length > 0 && <span>{followupHistory.length}</span>}
+                  </button>
                 </div>
 
-                {needLoading ? (
-                  <div className="popup-skeleton">
-                    <span />
-                    <span />
-                  </div>
-                ) : needError ? (
-                  <div className="popup-result-copy popup-error">{needError}</div>
-                ) : hasNeedOutput ? (
-                  <div className="popup-result-copy">{needResult}</div>
-                ) : (
-                  <div className="popup-empty-state">
-                    <span className="popup-empty-dot" aria-hidden="true" />
-                    {t.popup.resultPlaceholder}
-                  </div>
-                )}
+                <div className="popup-workspace-controls">
+                  {activeResultView === 'translation' && (
+                    <label className="popup-target-control">
+                      <span>{t.popup.toLabel}</span>
+                      <select
+                        value={needTargetLangCode}
+                        onChange={event => {
+                          targetOverrideRef.current = true
+                          setNeedTargetLangCode(event.target.value)
+                        }}
+                      >
+                        {USER_LANGUAGES.map(value => (
+                          <option key={value} value={value}>{languageChoiceLabel(value, interfaceLanguage)}</option>
+                        ))}
+                      </select>
+                    </label>
+                  )}
+                  <button
+                    type="button"
+                    className="popup-clear-button"
+                    onClick={handleClearWorkspace}
+                    disabled={needLoading || followupLoading}
+                    title={t.popup.clearWorkspaceTitle}
+                    aria-label={t.popup.clearWorkspaceTitle}
+                  >
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13M10 11v5m4-5v5" />
+                    </svg>
+                  </button>
+                </div>
               </div>
+
+              {activeResultView === 'translation' ? (
+                <div className="popup-translate-workspace">
+                  <div className="popup-workspace-section popup-workspace-section--source">
+                    <div className="popup-workspace-label">{t.popup.sourceTextLabel}</div>
+                    <textarea
+                      ref={needTextareaRef}
+                      className="popup-workspace-editor"
+                      placeholder={t.popup.inputPlaceholder}
+                      value={needText}
+                      onChange={event => setNeedText(event.target.value)}
+                      onKeyDown={event => {
+                        if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') handleNeedTranslate()
+                      }}
+                    />
+                    <div className="popup-workspace-actions">
+                      <span>Ctrl/Cmd + Enter</span>
+                      <button
+                        type="button"
+                        onClick={handleNeedTranslate}
+                        disabled={needLoading || !needText.trim()}
+                        className="popup-action-primary"
+                      >
+                        {needLoading ? <span className="popup-spinner" /> : null}
+                        {needLoading ? t.popup.transLoading : t.popup.transButton}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="popup-workspace-divider" aria-hidden="true"><span /></div>
+
+                  <div className="popup-workspace-section popup-workspace-section--result">
+                    <div className="popup-workspace-result-head">
+                      <div>
+                        <div className="popup-workspace-label">{t.popup.translatedTextLabel}</div>
+                        <div className="popup-workspace-language">{activeTargetLanguage}</div>
+                      </div>
+                      {needResult && !needLoading && !needError && (
+                        <div className="popup-result-actions">
+                          <button
+                            type="button"
+                            onClick={() => openFollowup(true)}
+                            className="popup-chat-button"
+                            title={t.popup.askAI}
+                          >
+                            <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                            </svg>
+                            <span>{t.popup.askAI}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleNeedCopy}
+                            className={`popup-icon-button ${needCopied ? 'is-copied' : ''}`}
+                            title={t.popup.copyTitle}
+                            aria-label={t.popup.copyTitle}
+                          >
+                            {needCopied ? (
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : (
+                              <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="popup-workspace-output" aria-live="polite">
+                      {needLoading ? (
+                        <div className="popup-skeleton"><span /><span /></div>
+                      ) : needError ? (
+                        <div className="popup-error">{needError}</div>
+                      ) : hasNeedOutput ? (
+                        <div className="popup-markdown">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{needResult}</ReactMarkdown>
+                        </div>
+                      ) : (
+                        <div className="popup-workspace-placeholder">
+                          <span className="popup-empty-dot" aria-hidden="true" />
+                          {t.popup.resultPlaceholder}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="popup-conversation">
+                  <div className="popup-conversation-context">
+                    <button
+                      type="button"
+                      data-active={useTranslationContext}
+                      disabled={!needResult.trim() || !needResultSourceText.trim()}
+                      onClick={() => setUseTranslationContext(current => !current)}
+                    >
+                      <span className="popup-context-dot" />
+                      {useTranslationContext ? t.popup.useTranslationContext : t.popup.directConversation}
+                    </button>
+                  </div>
+
+                  <div ref={conversationRef} className="popup-conversation-scroll" aria-live="polite">
+                    {followupHistory.length === 0 && !followupLoading && (
+                      <div className="popup-conversation-empty">
+                        <span className="popup-conversation-mark" aria-hidden="true">
+                          <svg className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.7} d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z" />
+                          </svg>
+                        </span>
+                        <strong>{t.popup.conversationEmptyTitle}</strong>
+                        <span>{t.popup.conversationEmptyDesc}</span>
+                      </div>
+                    )}
+
+                    {followupHistory.map((turn, index) => (
+                      <div key={`${turn.query}-${index}`} className="popup-chat-turn">
+                        <div className="popup-chat-role">{t.popup.userLabel}</div>
+                        <div className="popup-chat-query">{turn.query}</div>
+                        <div className="popup-chat-answer-head">
+                          <span>{t.popup.aiLabel}</span>
+                          <button
+                            type="button"
+                            onClick={() => handleCopyTurn(turn.answer, index)}
+                            className="popup-chat-copy"
+                            aria-label={t.popup.copyTitle}
+                            title={t.popup.copyTitle}
+                          >
+                            {copiedTurnIndex === index ? (
+                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+                              </svg>
+                            ) : (
+                              <svg className="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                              </svg>
+                            )}
+                          </button>
+                        </div>
+                        <div className="popup-chat-answer popup-markdown">
+                          <ReactMarkdown remarkPlugins={[remarkGfm]}>{turn.answer}</ReactMarkdown>
+                        </div>
+                      </div>
+                    ))}
+
+                    {followupLoading && (
+                      <div className="popup-chat-turn popup-chat-turn--pending">
+                        <div className="popup-chat-role">{t.popup.userLabel}</div>
+                        <div className="popup-chat-query">{pendingFollowupQuery}</div>
+                        <div className="popup-chat-answer-head">{t.popup.aiLabel}</div>
+                        <div className="popup-chat-thinking">
+                          <span /><span /><span />
+                          {t.popup.followupThinking}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
+                  <div className="popup-composer">
+                    <textarea
+                      ref={followupTextareaRef}
+                      rows={2}
+                      value={followupQuery}
+                      placeholder={t.popup.followupPlaceholder}
+                      disabled={followupLoading}
+                      onChange={event => setFollowupQuery(event.target.value)}
+                      onCompositionStart={() => { composingRef.current = true }}
+                      onCompositionEnd={() => { composingRef.current = false }}
+                      onKeyDown={event => {
+                        const native = event.nativeEvent as KeyboardEvent
+                        const isComposing = composingRef.current || native.isComposing || native.keyCode === 229
+                        if (event.key === 'Enter' && !event.shiftKey && !isComposing) {
+                          event.preventDefault()
+                          handleNeedFollowup()
+                        }
+                      }}
+                    />
+                    <div className="popup-composer-footer">
+                      <span className={followupError ? 'popup-composer-error' : ''}>
+                        {followupError || t.popup.followupHint}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={handleNeedFollowup}
+                        disabled={!canAskFollowup || !followupQuery.trim()}
+                        aria-label={t.popup.followupSend}
+                        title={t.popup.followupSend}
+                      >
+                        {followupLoading ? <span className="popup-spinner" /> : (
+                          <svg className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.9} d="M5 12h14m-6-6 6 6-6 6" />
+                          </svg>
+                        )}
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              )}
             </section>
           </div>
         )}
 
         {activeTab === 'bank' && (
-          <BankPanel memory={memory} interfaceLanguage={config.interfaceLanguage} t={t} />
+          <BankPanel memory={memory} userLanguage={config.userLanguage} interfaceLanguage={interfaceLanguage} t={t} />
         )}
 
         {activeTab === 'settings' && (
@@ -650,26 +1213,53 @@ const Popup = () => {
               <div className="popup-card">
                 <div className="popup-setting-row">
                   <div className="popup-setting-main">
-                    <span className="popup-setting-title">{t.popup.interfaceLanguage}</span>
-                    <span className="popup-setting-description">{t.popup.interfaceLanguageDesc}</span>
+                    <span className="popup-setting-title">{t.popup.userLanguage}</span>
+                    <span className="popup-setting-description">{t.popup.userLanguageDesc}</span>
                   </div>
-                  <div className="popup-lang-switch">
+                  <div className="popup-lang-switch" role="radiogroup" aria-label={t.popup.userLanguage}>
                     <button
                       type="button"
-                      onClick={() => setConfig({ ...config, interfaceLanguage: 'en' })}
                       className="popup-lang-option"
-                      data-active={config.interfaceLanguage === 'en'}
+                      role="radio"
+                      aria-checked={config.interfaceSide === 'en'}
+                      aria-label={t.popup.interfaceEnglish}
+                      title={t.popup.interfaceEnglish}
+                      data-active={config.interfaceSide === 'en'}
+                      onClick={() => void commitLanguage({ interfaceSide: 'en' })}
                     >
-                      EN
+                      En
                     </button>
-                    <button
-                      type="button"
-                      onClick={() => setConfig({ ...config, interfaceLanguage: 'zh' })}
-                      className="popup-lang-option"
-                      data-active={config.interfaceLanguage === 'zh'}
-                    >
-                      中
-                    </button>
+                    <div className="popup-lang-user" data-active={config.interfaceSide === 'user'}>
+                      <button
+                        type="button"
+                        className="popup-lang-option popup-lang-option--user"
+                        role="radio"
+                        aria-checked={config.interfaceSide === 'user'}
+                        title={USER_LANGUAGE_ENDONYM[config.userLanguage]}
+                        data-active="false"
+                        onClick={() => void commitLanguage({ interfaceSide: 'user' })}
+                      >
+                        {USER_LANGUAGE_ENDONYM[config.userLanguage]}
+                      </button>
+                      <label className="popup-lang-caret">
+                        <select
+                          aria-label={t.popup.userLanguagePick}
+                          value={config.userLanguage}
+                          onChange={event => {
+                            const nextLanguage = event.target.value
+                            if (!isUserLanguage(nextLanguage)) return
+                            void commitLanguage({ userLanguage: nextLanguage })
+                          }}
+                        >
+                          {USER_LANGUAGES.map(value => (
+                            <option key={value} value={value}>{USER_LANGUAGE_ENDONYM[value]}</option>
+                          ))}
+                        </select>
+                        <svg viewBox="0 0 20 20" fill="currentColor" aria-hidden="true">
+                          <path fillRule="evenodd" d="M5.23 7.21a.75.75 0 011.06.02L10 11.17l3.71-3.94a.75.75 0 111.08 1.04l-4.25 4.5a.75.75 0 01-1.08 0l-4.25-4.5a.75.75 0 01.02-1.06z" clipRule="evenodd" />
+                        </svg>
+                      </label>
+                    </div>
                   </div>
                 </div>
 
@@ -678,9 +1268,18 @@ const Popup = () => {
                     <span className="popup-setting-title">{t.popup.floatingTransTitle}</span>
                     <span className="popup-setting-description">{t.popup.floatingTransDesc}</span>
                   </div>
-                  <button type="button" onClick={handleToggleFloatingEnabled} className="popup-toggle" data-on={config.floatingEnabled}>
-                    <span className="popup-toggle__thumb" />
-                  </button>
+                  <div className="flex items-center gap-3">
+                    <span className="popup-helper min-w-[44px] text-right">
+                      {config.floatingEnabled ? t.popup.floatingTransEnabledState : t.popup.floatingTransDisabledState}
+                    </span>
+                    <button
+                      type="button"
+                      onClick={handleToggleFloatingEnabled}
+                      className="popup-action-secondary !h-[38px] !px-4 !py-0"
+                    >
+                      {config.floatingEnabled ? t.popup.floatingTransDisable : t.popup.floatingTransEnable}
+                    </button>
+                  </div>
                 </div>
 
                 <div className="popup-setting-row">

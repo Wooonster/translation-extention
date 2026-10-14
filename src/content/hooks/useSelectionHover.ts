@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { dlog, derr, initDebug } from '../../lib/debug'
+import { shouldSkipFloatingTranslation } from '../../lib/language'
 
 initDebug()
 
@@ -14,6 +15,12 @@ export interface SelectionInfo {
   text: string
   rects: Rect[] 
   boundingRect: Rect
+}
+
+const buildSelectionKey = (selection: SelectionInfo): string => {
+  const rect = selection.boundingRect
+  const rounded = [rect.top, rect.left, rect.right, rect.bottom].map(value => Math.round(value))
+  return `${selection.text.trim()}|${rounded.join(',')}`
 }
 
 const toRect = (rect: DOMRect): Rect => ({
@@ -72,7 +79,12 @@ const getWindowSelectionInfo = (): SelectionInfo | null => {
   }
 }
 
-export const useSelectionHover = (onTrigger: (text: string, selection: SelectionInfo) => void, hoverDuration = 3000, enabled = true) => {
+export const useSelectionHover = (
+  onTrigger: (text: string, selection: SelectionInfo) => void,
+  hoverDuration = 3000,
+  enabled = true,
+  userLanguage = 'zh',
+) => {
   const [selection, setSelection] = useState<SelectionInfo | null>(null)
   const [isHovering, setIsHovering] = useState(false)
   const [hoverProgress, setHoverProgress] = useState(0) // 0-100
@@ -80,6 +92,8 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
   // Ref to hold the latest onTrigger callback to avoid stale closures in setTimeout
   const onTriggerRef = useRef(onTrigger)
   const selectionRef = useRef<SelectionInfo | null>(null) // Ref for latest selection
+  const userLanguageRef = useRef(userLanguage)
+  userLanguageRef.current = userLanguage
   
   useEffect(() => {
     onTriggerRef.current = onTrigger
@@ -91,6 +105,8 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
   const monitorIntervalRef = useRef<NodeJS.Timeout | null>(null)
   const isInsideRef = useRef(false)
   const isTriggeredRef = useRef(false)
+  const currentSelectionKeyRef = useRef<string | null>(null)
+  const lastTriggeredSelectionKeyRef = useRef<string | null>(null)
   const lastMousePosRef = useRef<{ x: number; y: number } | null>(null)
   const activeInsideStartMsRef = useRef<number | null>(null)
   const accumulatedMsRef = useRef(0)
@@ -125,14 +141,6 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
     }
   }
 
-  const shouldSkipSelection = (text: string) => {
-    const trimmed = text.trim()
-    if (!trimmed) return true
-    const hasCjk = /[\u4e00-\u9fff]/.test(trimmed)
-    const hasLatin = /[A-Za-z]/.test(trimmed)
-    return hasCjk && !hasLatin
-  }
-
   useEffect(() => {
     if (!enabled) return
 
@@ -141,6 +149,8 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
       if (!nextSelection) {
         setSelection(null)
         selectionRef.current = null
+        currentSelectionKeyRef.current = null
+        lastTriggeredSelectionKeyRef.current = null
         setIsHovering(false)
         setHoverProgress(0)
         clearTimers()
@@ -149,28 +159,41 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
       }
 
       const selectedText = nextSelection.text
-      if (shouldSkipSelection(selectedText)) {
+      if (shouldSkipFloatingTranslation(selectedText, userLanguageRef.current)) {
         setSelection(null)
         selectionRef.current = null
+        currentSelectionKeyRef.current = null
+        lastTriggeredSelectionKeyRef.current = null
         setIsHovering(false)
         setHoverProgress(0)
         clearTimers()
         resetHoverState()
-        dlog('[AI Translate] Skip Chinese selection.')
+        dlog('[AI Translate] Skip floating translation.', { userLanguage: userLanguageRef.current })
         return
       }
 
-      const newSelection = nextSelection
-      setSelection(newSelection)
-      selectionRef.current = newSelection
-      resetHoverState()
+      const nextSelectionKey = buildSelectionKey(nextSelection)
+      const previousSelectionKey = currentSelectionKeyRef.current
+      const isSameSelection = previousSelectionKey === nextSelectionKey
+      currentSelectionKeyRef.current = nextSelectionKey
+
+      setSelection(nextSelection)
+      selectionRef.current = nextSelection
+
+      if (!isSameSelection) {
+        resetHoverState()
+      }
 
       const pos = lastMousePosRef.current
       if (pos) {
-        const { isInside, insideAnyRect, insideBoundingRect } = computeIsInside(pos, newSelection)
+        const { isInside, insideAnyRect, insideBoundingRect } = computeIsInside(pos, nextSelection)
         isInsideRef.current = isInside
         dlog('[AI Translate] Selection set. Mouse position check:', { isInside, insideAnyRect, insideBoundingRect })
-        if (isInside && !monitorIntervalRef.current) {
+        if (
+          isInside &&
+          !monitorIntervalRef.current &&
+          lastTriggeredSelectionKeyRef.current !== nextSelectionKey
+        ) {
           dlog('[AI Translate] Mouse already over selection. Starting timer.')
           startHoverMonitor()
         }
@@ -195,6 +218,7 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
     document.addEventListener('mouseup', handleMouseUp, true)
     document.addEventListener('keyup', handleSelectionChange, true) // Shift+Arrow selection
     document.addEventListener('selectionchange', handleSelectionChangeEvent)
+    handleSelectionChange()
 
     return () => {
       document.removeEventListener('mouseup', handleMouseUp, true)
@@ -215,7 +239,7 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
 
       const { isInside } = computeIsInside(lastMousePosRef.current, sel)
       isInsideRef.current = isInside
-      if (isInside) {
+      if (isInside && lastTriggeredSelectionKeyRef.current !== currentSelectionKeyRef.current) {
         dlog('[AI Translate] Mouse moved into selection. Starting timer.')
         startHoverMonitor()
       }
@@ -260,7 +284,11 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
           stopDebounceRef.current = null
         }
 
-        if (!isHovering && !monitorIntervalRef.current) {
+        if (
+          !isHovering &&
+          !monitorIntervalRef.current &&
+          lastTriggeredSelectionKeyRef.current !== currentSelectionKeyRef.current
+        ) {
           dlog('[AI Translate] Mouse entered selection area. Starting timer.')
           startHoverMonitor()
         }
@@ -285,6 +313,9 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
   }, [selection, isHovering, enabled])
 
   const startHoverMonitor = () => {
+    if (!currentSelectionKeyRef.current) return
+    if (lastTriggeredSelectionKeyRef.current === currentSelectionKeyRef.current) return
+
     setIsHovering(true)
     setHoverProgress(0)
 
@@ -329,6 +360,7 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
 
       if (effectiveMs >= hoverDuration) {
         isTriggeredRef.current = true
+        lastTriggeredSelectionKeyRef.current = currentSelectionKeyRef.current
         dlog('[AI Translate] Hover reached duration. Calling onTrigger.')
         stopHoverMonitor()
         const currentSelection = selectionRef.current
@@ -372,6 +404,8 @@ export const useSelectionHover = (onTrigger: (text: string, selection: Selection
     clearSelection: () => {
       setSelection(null)
       selectionRef.current = null
+      currentSelectionKeyRef.current = null
+      lastTriggeredSelectionKeyRef.current = null
       stopHoverMonitor()
     }
   }

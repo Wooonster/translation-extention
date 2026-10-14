@@ -9,6 +9,11 @@ export default defineConfig({
     react(),
     crx({ manifest }),
   ],
+  build: {
+    // Content scripts resolve dynamic imports from the extension origin.
+    // Vite's modulepreload links use page-absolute URLs and would 404 on the host page.
+    modulePreload: false,
+  },
   server: {
     port: 5173,
     strictPort: true,

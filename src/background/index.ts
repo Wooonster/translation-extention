@@ -1,8 +1,11 @@
-import { getConfig } from '../lib/config'
+import { getConfig, isUserLanguage, type UserLanguage } from '../lib/config'
+import { isSingleVocabularyWord } from '../lib/language'
 import { dlog, derr, initDebug } from '../lib/debug'
 import {
   applySummary,
+  clearSummary,
   deleteEntry,
+  dismissSummaryNotice,
   entriesForSummary,
   loadMemory,
   markEntryError,
@@ -10,7 +13,6 @@ import {
   saveMemory,
   snoozeReview,
   upsertPendingEntry,
-  type InterfaceLanguage,
   type SaveVocabInput,
   type VocabEntry,
   type VocabSummary,
@@ -23,6 +25,7 @@ let keepAliveTimer: ReturnType<typeof setInterval> | null = null
 const CACHE_PREFIX = 'translationCache:'
 const CACHE_TTL_MS = 1000 * 60 * 60 * 24 * 7
 const CACHE_MAX_ENTRIES = 300
+const TRANSIENT_FETCH_RETRY_LIMIT = 1
 
 chrome.runtime.onInstalled.addListener(() => {
   dlog('浮译/Floator installed.')
@@ -48,7 +51,7 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
   }
 
   if (request.action === 'FOLLOWUP') {
-    handleFollowup(request.payload.query, request.payload.sourceText, request.payload.translatedText)
+    handleFollowup(request.payload.query, request.payload.sourceText, request.payload.translatedText, request.payload.history)
       .then(result => sendResponse({ status: 'success', data: result }))
       .catch(error => sendResponse({ status: 'error', error: error.message }))
     return true
@@ -89,6 +92,20 @@ chrome.runtime.onMessage.addListener((request, _sender, sendResponse) => {
     return true
   }
 
+  if (request.action === 'CLEAR_VOCAB_SUMMARY') {
+    handleClearVocabSummary()
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Delete failed') }))
+    return true
+  }
+
+  if (request.action === 'DISMISS_VOCAB_SUMMARY') {
+    handleDismissVocabSummary()
+      .then(data => sendResponse({ status: 'success', data }))
+      .catch(error => sendResponse({ status: 'error', error: errorMessage(error, 'Dismiss failed') }))
+    return true
+  }
+
   if (request.action === 'SNOOZE_VOCAB_REVIEW') {
     handleSnoozeVocabReview()
       .then(data => sendResponse({ status: 'success', data }))
@@ -117,26 +134,50 @@ chrome.runtime.onConnect.addListener(port => {
   })
 
   port.onMessage.addListener(message => {
-    if (message?.action !== 'START_TRANSLATE_STREAM') return
-
     abortController?.abort()
     const controller = new AbortController()
     abortController = controller
 
-    handleTranslateStream(
-      message.payload?.text,
-      message.payload?.targetLangCode,
-      message.payload?.attempt,
-      {
-        signal: controller.signal,
-        onStart: () => postMessage({ type: 'started' }),
-        onDelta: delta => postMessage({ type: 'delta', delta }),
-        onComplete: data => postMessage({ type: 'complete', data }),
-      }
-    ).catch((error: any) => {
-      if (disconnected || controller.signal.aborted || error?.name === 'AbortError') return
-      postMessage({ type: 'error', error: error?.message || 'Stream failed' })
-    })
+    const streamHandlers = {
+      signal: controller.signal,
+      onStart: () => postMessage({ type: 'started' }),
+      onDelta: (delta: string) => postMessage({ type: 'delta', delta }),
+    }
+
+    if (message?.action === 'START_TRANSLATE_STREAM') {
+      handleTranslateStream(
+        message.payload?.text,
+        message.payload?.targetLangCode,
+        message.payload?.attempt,
+        {
+          ...streamHandlers,
+          onComplete: data => postMessage({ type: 'complete', data }),
+        }
+      ).catch((error: any) => {
+        if (disconnected || controller.signal.aborted || error?.name === 'AbortError') return
+        postMessage({ type: 'error', error: error?.message || 'Stream failed' })
+      })
+      return
+    }
+
+    if (message?.action === 'START_FOLLOWUP_STREAM') {
+      handleFollowupStream(
+        message.payload?.query,
+        message.payload?.sourceText,
+        message.payload?.translatedText,
+        message.payload?.history,
+        {
+          ...streamHandlers,
+          onComplete: data => postMessage({ type: 'complete', data }),
+        }
+      ).catch((error: any) => {
+        if (disconnected || controller.signal.aborted || error?.name === 'AbortError') return
+        postMessage({ type: 'error', error: error?.message || 'Stream failed' })
+      })
+      return
+    }
+
+    abortController = null
   })
 })
 
@@ -166,7 +207,7 @@ async function handlePreload(): Promise<void> {
   // Send a minimal request to trigger model loading
   // We use max_tokens: 1 to minimize generation time
   try {
-    const response = await fetch(endpoint, {
+    const response = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers: buildRequestHeaders(config.apiKey),
       body: JSON.stringify({
@@ -177,7 +218,7 @@ async function handlePreload(): Promise<void> {
         max_tokens: 5,
         temperature: 0
       })
-    })
+    }, 'Preload request')
 
     if (!response.ok) {
       await throwApiError(response, 'Preload failed')
@@ -199,6 +240,18 @@ interface TranslateStreamOptions {
   onStart?: () => void
   onDelta?: (delta: string) => void
   onComplete?: (result: TranslateResponse) => void
+}
+
+interface TextStreamOptions {
+  signal?: AbortSignal
+  onStart?: () => void
+  onDelta?: (delta: string) => void
+  onComplete?: (result: string) => void
+}
+
+interface ConversationTurn {
+  query: string
+  answer: string
 }
 
 async function handleTranslate(text: string, targetLangCode?: string, attempt?: number): Promise<TranslateResponse> {
@@ -262,7 +315,7 @@ async function handleTranslate(text: string, targetLangCode?: string, attempt?: 
           },
         ]
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers: buildRequestHeaders(config.apiKey),
       body: JSON.stringify({
@@ -271,7 +324,7 @@ async function handleTranslate(text: string, targetLangCode?: string, attempt?: 
         temperature,
         top_p
       })
-    })
+    }, 'Translation request')
 
     if (!response.ok) {
       await throwApiError(response)
@@ -356,7 +409,7 @@ async function handleTranslateStream(
         },
       ]
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: buildRequestHeaders(config.apiKey),
     body: JSON.stringify({
@@ -367,7 +420,7 @@ async function handleTranslateStream(
       stream: true,
     }),
     signal: options.signal,
-  })
+  }, 'Streaming translation request')
 
   if (!response.ok) {
     await throwApiError(response)
@@ -428,30 +481,44 @@ async function handleTranslateStream(
   await setCachedTranslation(cacheKey, JSON.stringify(result))
 }
 
-async function handleFollowup(query: string, sourceText: string, translatedText: string): Promise<string> {
+async function handleFollowup(
+  query: string,
+  sourceText: string,
+  translatedText: string,
+  history?: ConversationTurn[]
+): Promise<string> {
   const normalizedQuery = String(query ?? '').trim()
   const normalizedSourceText = String(sourceText ?? '').trim()
   const normalizedTranslatedText = String(translatedText ?? '').trim()
   if (!normalizedQuery) throw new Error('Query is empty')
-  if (!normalizedSourceText || !normalizedTranslatedText) throw new Error('Context is empty')
 
   const config = await getConfig()
   const endpoint = resolveChatCompletionsEndpoint(config.apiUrl)
 
   const isTranslateGemma = isTranslateGemmaModel(config.modelName)
-  const prompt = buildFollowupPrompt({
-    query: normalizedQuery,
-    sourceText: normalizedSourceText,
-    translatedText: normalizedTranslatedText,
-  })
+  const hasTranslationContext = Boolean(normalizedSourceText && normalizedTranslatedText)
+  const prompt = hasTranslationContext
+    ? buildFollowupPrompt({
+        query: normalizedQuery,
+        sourceText: normalizedSourceText,
+        translatedText: normalizedTranslatedText,
+      })
+    : normalizedQuery
+  const historyMessages = buildConversationHistory(history)
   const messages = isTranslateGemma
-    ? [{ role: 'user', content: prompt }]
+    ? [...historyMessages, { role: 'user', content: prompt }]
     : [
-        { role: 'system', content: 'You are a helpful bilingual assistant. Use the provided source and translation context to answer user follow-up questions.' },
+        {
+          role: 'system',
+          content: hasTranslationContext
+            ? 'You are a helpful bilingual assistant. Use the provided source and translation context to answer user follow-up questions.'
+            : 'You are a concise, helpful assistant. Respond in the language used by the user unless they ask otherwise.',
+        },
+        ...historyMessages,
         { role: 'user', content: prompt },
       ]
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: buildRequestHeaders(config.apiKey),
     body: JSON.stringify({
@@ -460,7 +527,7 @@ async function handleFollowup(query: string, sourceText: string, translatedText:
       temperature: 0.3,
       top_p: 0.95
     })
-  })
+  }, 'Follow-up request')
 
   if (!response.ok) {
     await throwApiError(response)
@@ -470,6 +537,112 @@ async function handleFollowup(query: string, sourceText: string, translatedText:
   const content = extractAssistantContent(data)
   if (!content) return 'No response returned.'
   return stripEdgeNewlines(content)
+}
+
+async function handleFollowupStream(
+  query: string,
+  sourceText: string,
+  translatedText: string,
+  history: ConversationTurn[] | undefined,
+  options: TextStreamOptions = {}
+): Promise<void> {
+  const normalizedQuery = String(query ?? '').trim()
+  const normalizedSourceText = String(sourceText ?? '').trim()
+  const normalizedTranslatedText = String(translatedText ?? '').trim()
+  if (!normalizedQuery) throw new Error('Query is empty')
+
+  const config = await getConfig()
+  const endpoint = resolveChatCompletionsEndpoint(config.apiUrl)
+  const isTranslateGemma = isTranslateGemmaModel(config.modelName)
+  const hasTranslationContext = Boolean(normalizedSourceText && normalizedTranslatedText)
+  const prompt = hasTranslationContext
+    ? buildFollowupPrompt({
+        query: normalizedQuery,
+        sourceText: normalizedSourceText,
+        translatedText: normalizedTranslatedText,
+      })
+    : normalizedQuery
+  const historyMessages = buildConversationHistory(history)
+  const messages = isTranslateGemma
+    ? [...historyMessages, { role: 'user', content: prompt }]
+    : [
+        {
+          role: 'system',
+          content: hasTranslationContext
+            ? 'You are a helpful bilingual assistant. Use the provided source and translation context to answer user follow-up questions.'
+            : 'You are a concise, helpful assistant. Respond in the language used by the user unless they ask otherwise.',
+        },
+        ...historyMessages,
+        { role: 'user', content: prompt },
+      ]
+
+  const response = await fetchWithRetry(endpoint, {
+    method: 'POST',
+    headers: buildRequestHeaders(config.apiKey),
+    body: JSON.stringify({
+      model: config.modelName,
+      messages,
+      temperature: 0.3,
+      top_p: 0.95,
+      stream: true,
+    }),
+    signal: options.signal,
+  }, 'Streaming follow-up request')
+
+  if (!response.ok) {
+    await throwApiError(response)
+  }
+
+  options.onStart?.()
+
+  const contentType = response.headers.get('content-type') || ''
+  if (contentType.includes('application/json')) {
+    const data = await response.json()
+    const result = stripEdgeNewlines(extractAssistantContent(data))
+    if (result) options.onDelta?.(result)
+    options.onComplete?.(result)
+    return
+  }
+
+  const reader = response.body?.getReader()
+  if (!reader) throw new Error('Streaming response body unavailable')
+
+  const decoder = new TextDecoder()
+  let buffer = ''
+  let rawContent = ''
+
+  while (true) {
+    const { value, done } = await reader.read()
+    if (done) break
+
+    buffer += decoder.decode(value, { stream: true })
+    const consumed = consumeSseEvents(buffer)
+    buffer = consumed.rest
+
+    for (const event of consumed.events) {
+      if (event === '[DONE]') {
+        buffer = ''
+        break
+      }
+
+      const delta = extractStreamDelta(event)
+      if (!delta) continue
+      rawContent += delta
+      options.onDelta?.(delta)
+    }
+  }
+
+  buffer += decoder.decode()
+  const remaining = consumeSseEvents(buffer)
+  for (const event of remaining.events) {
+    if (event === '[DONE]') continue
+    const delta = extractStreamDelta(event)
+    if (!delta) continue
+    rawContent += delta
+    options.onDelta?.(delta)
+  }
+
+  options.onComplete?.(stripEdgeNewlines(rawContent))
 }
 
 let memoryQueue: Promise<void> = Promise.resolve()
@@ -523,10 +696,26 @@ async function handleSnoozeVocabReview() {
   })
 }
 
+async function handleClearVocabSummary(): Promise<{ cleared: true }> {
+  await withMemoryLock(async () => {
+    const memory = await loadMemory()
+    await saveMemory(clearSummary(memory))
+  })
+  return { cleared: true }
+}
+
+async function handleDismissVocabSummary(): Promise<{ dismissed: true }> {
+  await withMemoryLock(async () => {
+    const memory = await loadMemory()
+    await saveMemory(dismissSummaryNotice(memory))
+  })
+  return { dismissed: true }
+}
+
 async function handleEnrichVocab(payload: any): Promise<VocabEntry> {
   dlog('[Vocab] Enrich request')
   const config = await getConfig()
-  const interfaceLanguage = resolveInterfaceLanguage(payload?.interfaceLanguage, config.interfaceLanguage)
+  const userLanguage = resolveRequestUserLanguage(payload?.userLanguage, config.userLanguage)
   const entry = await withMemoryLock(() => resolveEnrichEntry(payload))
 
   try {
@@ -534,17 +723,17 @@ async function handleEnrichVocab(payload: any): Promise<VocabEntry> {
     const prompt = buildEnrichPrompt({
       word: entry.word,
       sourceSentence: entry.sourceSentence,
-      interfaceLanguage,
+      userLanguage,
     })
     const isTranslateGemma = isTranslateGemmaModel(config.modelName)
     const messages = isTranslateGemma
       ? [{ role: 'user', content: prompt }]
       : [
-          { role: 'system', content: enrichSystemPrompt(interfaceLanguage) },
+          { role: 'system', content: enrichSystemPrompt(userLanguage) },
           { role: 'user', content: prompt },
         ]
 
-    const response = await fetch(endpoint, {
+    const response = await fetchWithRetry(endpoint, {
       method: 'POST',
       headers: buildRequestHeaders(config.apiKey),
       body: JSON.stringify({
@@ -553,15 +742,16 @@ async function handleEnrichVocab(payload: any): Promise<VocabEntry> {
         temperature: 0.1,
         top_p: 0.9,
       }),
-    })
+    }, 'Enrichment request')
 
     if (!response.ok) await throwApiError(response, 'Enrichment failed')
 
     const data = await response.json()
     const parsed = parseEnrichmentJson(extractAssistantContent(data))
-    if (!parsed.ipa && !parsed.translation && !parsed.explanation) {
+    if (!parsed.ipa && !parsed.translation && !parsed.userTranslation && !parsed.explanation) {
       throw new Error('Enrichment failed')
     }
+    if (!isSingleVocabularyWord(entry.word)) parsed.partOfSpeech = ''
 
     const updated = await withMemoryLock(async () => {
       const memory = await loadMemory()
@@ -606,7 +796,7 @@ async function resolveEnrichEntry(payload: any): Promise<VocabEntry> {
 async function handleSummarizeVocab(payload: any): Promise<VocabSummary> {
   dlog('[Vocab] Summary request')
   const config = await getConfig()
-  const interfaceLanguage = resolveInterfaceLanguage(payload?.interfaceLanguage, config.interfaceLanguage)
+  const userLanguage = resolveRequestUserLanguage(payload?.userLanguage, config.userLanguage)
   const memory = await loadMemory()
   const picked = entriesForSummary(memory, 50)
   if (!picked.length) throw new Error('Vocabulary bank is empty')
@@ -614,18 +804,18 @@ async function handleSummarizeVocab(payload: any): Promise<VocabSummary> {
   const endpoint = resolveChatCompletionsEndpoint(config.apiUrl)
   const prompt = buildSummaryPrompt({
     entries: picked,
-    interfaceLanguage,
+    userLanguage,
     hasNewWords: memory.review.newSinceSummary > 0,
   })
   const isTranslateGemma = isTranslateGemmaModel(config.modelName)
   const messages = isTranslateGemma
     ? [{ role: 'user', content: prompt }]
     : [
-        { role: 'system', content: summarySystemPrompt(interfaceLanguage) },
+        { role: 'system', content: summarySystemPrompt(userLanguage) },
         { role: 'user', content: prompt },
       ]
 
-  const response = await fetch(endpoint, {
+  const response = await fetchWithRetry(endpoint, {
     method: 'POST',
     headers: buildRequestHeaders(config.apiKey),
     body: JSON.stringify({
@@ -634,7 +824,7 @@ async function handleSummarizeVocab(payload: any): Promise<VocabSummary> {
       temperature: 0.3,
       top_p: 0.95,
     }),
-  })
+  }, 'Summary request')
 
   if (!response.ok) await throwApiError(response, 'Summary failed')
 
@@ -651,85 +841,132 @@ async function handleSummarizeVocab(payload: any): Promise<VocabSummary> {
   return stored
 }
 
-function resolveInterfaceLanguage(value: unknown, fallback: InterfaceLanguage): InterfaceLanguage {
-  if (value === 'zh' || value === 'en') return value
-  return fallback === 'zh' ? 'zh' : 'en'
+function resolveRequestUserLanguage(value: unknown, fallback: UserLanguage): UserLanguage {
+  if (isUserLanguage(value)) return value
+  return fallback
 }
 
-function enrichSystemPrompt(interfaceLanguage: InterfaceLanguage): string {
-  if (interfaceLanguage === 'zh') return '你是词汇助手。只输出严格 JSON，不要附加说明。'
+function enrichSystemPrompt(userLanguage: UserLanguage): string {
+  if (userLanguage === 'zh') return '你是词汇助手。只输出严格 JSON，不要附加说明。'
   return 'You are a vocabulary assistant. Output strict JSON only, with no extra commentary.'
 }
 
-function summarySystemPrompt(interfaceLanguage: InterfaceLanguage): string {
-  if (interfaceLanguage === 'zh') return '你是词汇复习助手。用中文写一段简短、可执行的复习摘要。'
-  return 'You are a vocabulary review assistant. Write a short, practical study digest.'
+function summarySystemPrompt(userLanguage: UserLanguage): string {
+  const languageName = langCodeToPromptName(userLanguage)
+  if (userLanguage === 'zh') {
+    return (
+      '你帮助用户记住他们保存的词。这是记忆辅助，不是泛泛的内容摘要。' +
+      '每个词都要给出三样东西：从原句抽出的简短回忆线索、该词在其原语言中的意思、以及中文意思。' +
+      '摘要必须同时用原语言和中文书写，每个词用成对的两行，或明确标注的两半。' +
+      '保持简短。这次总结里的每一个词都要能被认出来，不要写成把词埋进去的短文。'
+    )
+  }
+  return (
+    'You help the user remember words they saved. This is a memory aid, not a generic digest. ' +
+    `For each word, give a short recall cue taken from its source sentence, the meaning in the word's original language, and the meaning in ${languageName}. ` +
+    `Write the summary in both the original language and ${languageName}, as paired lines or clearly labeled halves. ` +
+    'Stay brief. Every saved word in the summarized set must stay recognizable, not buried in an essay.'
+  )
 }
 
 function buildEnrichPrompt(params: {
   word: string
   sourceSentence: string
-  interfaceLanguage: InterfaceLanguage
+  userLanguage: UserLanguage
 }): string {
   const sentence = clipPromptText(params.sourceSentence, 1000)
-  if (params.interfaceLanguage === 'zh') {
+  const languageName = langCodeToPromptName(params.userLanguage)
+  const singleWord = isSingleVocabularyWord(params.word)
+  if (params.userLanguage === 'zh') {
+    const keys = singleWord
+      ? '"ipa"、"translation"、"userTranslation"、"explanation"、"partOfSpeech"'
+      : '"ipa"、"translation"、"userTranslation"、"explanation"'
+    const partLine = singleWord
+      ? '- partOfSpeech：这个单词的词性，用简短中文，例如名词、动词、形容词。\n'
+      : ''
     return (
       '只输出严格 JSON，不要使用 markdown 代码块，不要附加任何其他文字。\n' +
-      'JSON 必须只包含这三个键："ipa"、"translation"、"explanation"。\n' +
-      '- ipa：所保存单词本身的国际音标读音。\n' +
-      '- translation：将该词翻译成中文。\n' +
-      '- explanation：结合原句，用中文简要解释这个词。\n\n' +
-      `单词：${params.word}\n` +
+      `JSON 必须只包含这些键：${keys}。\n` +
+      `- ipa：国际音标读音。${singleWord ? '给这个单词的读音。' : '给整段词组的读音。'}\n` +
+      '- translation：用该词自己的语言写一句简短释义，不要写成中文译文。\n' +
+      '- userTranslation：将该词翻译成中文。\n' +
+      '- explanation：结合原句，用中文简要解释这个词。\n' +
+      partLine +
+      '用户语言是中文。\n\n' +
+      `${singleWord ? '单词' : '词条'}：${params.word}\n` +
       `原句：${sentence}`
     )
   }
 
+  const keys = singleWord
+    ? '"ipa", "translation", "userTranslation", "explanation", "partOfSpeech"'
+    : '"ipa", "translation", "userTranslation", "explanation"'
+  const partLine = singleWord
+    ? `- partOfSpeech: a short part-of-speech label for this single word, such as noun, verb, or adjective, written in ${languageName}.\n`
+    : ''
   return (
     'Reply with strict JSON only. Do not use markdown fences. Do not add any other text.\n' +
-    'The JSON object must have exactly these keys: "ipa", "translation", "explanation".\n' +
-    '- ipa: IPA pronunciation of the saved word itself.\n' +
-    '- translation: translate the word into English.\n' +
-    '- explanation: a short English explanation of the word in this sentence.\n\n' +
-    `Word: ${params.word}\n` +
+    `The JSON object must have exactly these keys: ${keys}.\n` +
+    `- ipa: IPA pronunciation. ${singleWord ? 'Pronounce this single word.' : 'Pronounce the whole phrase.'}\n` +
+    "- translation: a short gloss in the word's own language. Do not translate this field into the user language.\n" +
+    `- userTranslation: translate the word into ${languageName}.\n` +
+    `- explanation: a short explanation of the word in this sentence, written in ${languageName}.\n` +
+    partLine +
+    `The user language is ${languageName}.\n\n` +
+    `${singleWord ? 'Word' : 'Phrase'}: ${params.word}\n` +
     `Source sentence: ${sentence}`
   )
 }
 
 function buildSummaryPrompt(params: {
   entries: VocabEntry[]
-  interfaceLanguage: InterfaceLanguage
+  userLanguage: UserLanguage
   hasNewWords: boolean
 }): string {
+  const languageName = langCodeToPromptName(params.userLanguage)
   const lines = params.entries.map((entry, index) => formatSummaryEntry(entry, index)).join('\n')
-  if (params.interfaceLanguage === 'zh') {
+  if (params.userLanguage === 'zh') {
     const scope = params.hasNewWords
       ? '下面这些词是上次总结之后保存的。'
-      : '用户希望总结整本词库，即使上次总结后没有新词。'
+      : '下面是要记住的词，即使上次总结后没有新保存的词。'
     return (
       `${scope}\n` +
-      '请用中文写一段简短的复习摘要：把相关的词放在一起，点出易混之处，并建议接下来复习什么。纯文本，不要表格，控制在 180 字以内。\n\n' +
+      '为每一个词写记忆提示，不要漏掉任何一个。每个词用成对的两行：一行用该词的原语言，一行用中文。' +
+      '每行包含从原句抽出的简短回忆线索、原语言释义，以及中文释义。' +
+      '条目里的 originalMeaning 是原语言释义，userMeaning 是用户语言译文；有内容时优先使用。' +
+      '纯文本，不要表格，不要写成短文。\n\n' +
       `词条：\n${lines}`
     )
   }
 
   const scope = params.hasNewWords
-    ? 'These entries were saved since the last summary.'
-    : 'The learner asked for a summary of the whole bank, even if nothing new was saved since the last summary.'
+    ? 'These words were saved since the last summary.'
+    : 'These are the words to remember, even if nothing new was saved since the last summary.'
   return (
     `${scope}\n` +
-    'Write a short study digest: group related words, note easy mix-ups, and suggest what to review next. Plain text, no tables, under 180 words.\n\n' +
+    `The user language is ${languageName}. Write a memory aid that includes every word below. ` +
+    `For each word, use paired lines or clearly labeled halves: one in the word's original language and one in ${languageName}. ` +
+    `Each half gives a short recall cue from the source sentence, the original-language meaning, and the ${languageName} meaning. ` +
+    'originalMeaning is the gloss in the word\'s own language, and userMeaning is the translation into the user language. Prefer them when present. ' +
+    'Plain text, no tables, and no essay. Every word must stay recognizable.\n\n' +
     `Entries:\n${lines}`
   )
 }
 
 function formatSummaryEntry(entry: VocabEntry, index: number): string {
-  const parts = [entry.word]
-  if (entry.ipa) parts.push(entry.ipa)
-  if (entry.translation) parts.push(entry.translation)
-  if (entry.explanation) parts.push(clipPromptText(entry.explanation, 180))
+  const parts = [`word: ${entry.word}`]
+  if (entry.ipa) parts.push(`ipa: ${entry.ipa}`)
+  if (entry.translation) parts.push(`originalMeaning: ${entry.translation}`)
+  if (entry.userTranslation) parts.push(`userMeaning: ${entry.userTranslation}`)
+  if (entry.partOfSpeech) parts.push(`partOfSpeech: ${entry.partOfSpeech}`)
+  if (entry.explanation) parts.push(`note: ${clipPromptText(entry.explanation, 180)}`)
   const sentence = clipPromptText(entry.sourceSentence.replace(/\s+/g, ' '), 280)
-  if (sentence) parts.push(sentence)
-  return `${index + 1}. ${parts.join(' — ')}`
+  if (sentence) parts.push(`sourceSentence: ${sentence}`)
+  const otherSentences = (entry.sources ?? [])
+    .map(source => clipPromptText(source.sentence.replace(/\s+/g, ' '), 280))
+    .filter(text => text && text !== sentence)
+  if (otherSentences.length) parts.push(`otherSentences: ${otherSentences.join(' / ')}`)
+  return `${index + 1}. ${parts.join(' | ')}`
 }
 
 function clipPromptText(value: string, max: number): string {
@@ -738,7 +975,7 @@ function clipPromptText(value: string, max: number): string {
   return `${trimmed.slice(0, Math.max(0, max - 1))}…`
 }
 
-function parseEnrichmentJson(raw: string): { ipa: string; translation: string; explanation: string } {
+function parseEnrichmentJson(raw: string): { ipa: string; translation: string; userTranslation: string; explanation: string; partOfSpeech: string } {
   const text = extractJsonObject(stripJsonFences(raw))
   let parsed: unknown
   try {
@@ -754,7 +991,9 @@ function parseEnrichmentJson(raw: string): { ipa: string; translation: string; e
   return {
     ipa: readJsonString(obj, ['ipa']),
     translation: readJsonString(obj, ['translation']),
+    userTranslation: readJsonString(obj, ['userTranslation']),
     explanation: readJsonString(obj, ['explanation']),
+    partOfSpeech: readJsonString(obj, ['partOfSpeech', 'part_of_speech', 'pos']),
   }
 }
 
@@ -940,6 +1179,25 @@ function buildTranslateGemmaUserPrompt(params: { text: string; sourceLangCode: s
   )
 }
 
+function buildConversationHistory(
+  history: ConversationTurn[] | undefined
+): Array<{ role: 'user' | 'assistant'; content: string }> {
+  if (!Array.isArray(history)) return []
+
+  return history
+    .filter(turn => turn && typeof turn.query === 'string' && typeof turn.answer === 'string')
+    .slice(-12)
+    .flatMap(turn => {
+      const query = turn.query.trim()
+      const answer = turn.answer.trim()
+      if (!query || !answer) return []
+      return [
+        { role: 'user' as const, content: query },
+        { role: 'assistant' as const, content: answer },
+      ]
+    })
+}
+
 function buildFollowupPrompt(params: { query: string; sourceText: string; translatedText: string }): string {
   return (
     `User follow-up question:\n${params.query}\n\n` +
@@ -1005,6 +1263,42 @@ function buildRequestHeaders(apiKey?: string): Record<string, string> {
   const normalizedKey = String(apiKey || '').trim()
   if (normalizedKey) headers.Authorization = `Bearer ${normalizedKey}`
   return headers
+}
+
+async function fetchWithRetry(endpoint: string, init: RequestInit, requestLabel: string): Promise<Response> {
+  let lastError: unknown
+
+  for (let attempt = 0; attempt <= TRANSIENT_FETCH_RETRY_LIMIT; attempt += 1) {
+    try {
+      return await fetch(endpoint, init)
+    } catch (error) {
+      if (init.signal?.aborted) throw error
+      lastError = error
+      if (!isTransientFetchError(error) || attempt >= TRANSIENT_FETCH_RETRY_LIMIT) break
+      await delay(250 * (attempt + 1))
+    }
+  }
+
+  throw createReadableFetchError(endpoint, requestLabel, lastError)
+}
+
+function isTransientFetchError(error: unknown): boolean {
+  const message = String((error as { message?: unknown })?.message ?? '')
+  return /failed to fetch/i.test(message) || /networkerror/i.test(message)
+}
+
+function createReadableFetchError(endpoint: string, requestLabel: string, error: unknown): Error {
+  const message = String((error as { message?: unknown })?.message ?? '').trim() || 'Failed to fetch'
+  if (/failed to fetch/i.test(message) || /networkerror/i.test(message)) {
+    return new Error(
+      `${requestLabel} failed: unable to reach ${endpoint}. Check the API endpoint, model service, and network connection.`
+    )
+  }
+  return new Error(`${requestLabel} failed: ${message}`)
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise(resolve => setTimeout(resolve, ms))
 }
 
 async function throwApiError(response: Response, prefix = 'API Error'): Promise<never> {

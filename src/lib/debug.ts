@@ -8,18 +8,22 @@ export const initDebug = async () => {
   initialized = true
 
   try {
+    if (!chrome.runtime?.id) return
     const config = await getConfig()
     enabled = Boolean((config as any).debug)
+    chrome.storage.onChanged.addListener((changes, areaName) => {
+      try {
+        if (areaName !== 'sync') return
+        const next = changes.config?.newValue as any
+        if (!next) return
+        enabled = Boolean(next.debug)
+      } catch {
+        enabled = false
+      }
+    })
   } catch {
     enabled = false
   }
-
-  chrome.storage.onChanged.addListener((changes, areaName) => {
-    if (areaName !== 'sync') return
-    const next = changes.config?.newValue as any
-    if (!next) return
-    enabled = Boolean(next.debug)
-  })
 }
 
 export const dlog = (...args: any[]) => {

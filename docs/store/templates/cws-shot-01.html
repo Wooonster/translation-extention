@@ -1,0 +1,326 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Floator - Popup Translation</title>
+  <style>
+    :root {
+      --ink: #1f2d3d;
+      --ink-soft: #4b5f77;
+      --line: #d3dce8;
+      --panel: #ffffff;
+      --panel-soft: #f6f9fd;
+      --accent: #2f8fdd;
+      --accent-soft: #dff0ff;
+      --accent-alt: #4776f4;
+      --ok: #0f9f6a;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 1280px;
+      height: 800px;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 10%, #d8ecff 0, transparent 38%),
+        radial-gradient(circle at 92% 14%, #e2e9ff 0, transparent 34%),
+        linear-gradient(160deg, #f9fcff 0%, #eef4fb 46%, #ebf1fb 100%);
+      overflow: hidden;
+    }
+    .frame {
+      width: 1180px;
+      height: 700px;
+      margin: 50px;
+      border-radius: 28px;
+      border: 1px solid #d7e2f1;
+      box-shadow: 0 28px 50px -34px rgba(21, 56, 90, 0.35);
+      display: grid;
+      grid-template-columns: 1.2fr 0.85fr;
+      gap: 24px;
+      padding: 24px;
+      background: rgba(255,255,255,0.84);
+      backdrop-filter: blur(10px);
+    }
+    .web {
+      border-radius: 22px;
+      border: 1px solid #d6deea;
+      background: #fff;
+      overflow: hidden;
+      display: flex;
+      flex-direction: column;
+    }
+    .toolbar {
+      height: 46px;
+      background: linear-gradient(180deg, #f8fbff, #f1f5fb);
+      border-bottom: 1px solid #e2e9f3;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 0 16px;
+      color: #72839a;
+      font-size: 14px;
+    }
+    .dot { width: 10px; height: 10px; border-radius: 999px; background: #d2dae6; }
+    .addr {
+      margin-left: 8px;
+      border: 1px solid #dce5f2;
+      border-radius: 999px;
+      height: 28px;
+      flex: 1;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      background: #fff;
+      font-size: 13px;
+    }
+    .page {
+      flex: 1;
+      padding: 30px;
+      background:
+        linear-gradient(180deg, #fff, #f9fbff 70%);
+    }
+    .title {
+      margin: 0;
+      font-size: 34px;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+    }
+    .subtitle {
+      margin: 8px 0 18px;
+      color: var(--ink-soft);
+      font-size: 16px;
+    }
+    .bubble {
+      border-radius: 16px;
+      border: 1px solid #dce7f5;
+      background: #f9fcff;
+      padding: 16px;
+      margin-bottom: 12px;
+      font-size: 15px;
+      line-height: 1.55;
+    }
+    .selected {
+      background: #fff2a8;
+      border-radius: 6px;
+      padding: 1px 4px;
+    }
+
+    .popup {
+      border-radius: 24px;
+      border: 1px solid #d4dff0;
+      background:
+        radial-gradient(circle at top, #ecf6ff 0%, transparent 42%),
+        linear-gradient(180deg, #fefeff, #eff5fc);
+      box-shadow: 0 22px 36px -30px rgba(29, 70, 110, 0.45);
+      padding: 16px;
+      display: flex;
+      flex-direction: column;
+    }
+    .head {
+      display: flex;
+      justify-content: space-between;
+      align-items: start;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+    .kicker {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 10px;
+      border-radius: 999px;
+      border: 1px solid #d8e4f2;
+      background: #fff;
+      font-size: 10px;
+      letter-spacing: 0.1em;
+      color: #5f7288;
+      text-transform: uppercase;
+      font-weight: 700;
+    }
+    .kicker::before {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #48a2e7, #2d7ccd);
+    }
+    .popup h2 {
+      margin: 8px 0 4px;
+      font-family: "Iowan Old Style", Georgia, serif;
+      font-size: 30px;
+      line-height: 1.06;
+    }
+    .popup p {
+      margin: 0;
+      color: #5f7288;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .lang {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #5f7288;
+      border: 1px solid #d8e4f2;
+      border-radius: 999px;
+      padding: 6px 9px;
+      background: #fff;
+    }
+    .tabs {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      border: 1px solid #d9e4f2;
+      border-radius: 999px;
+      background: #f9fbff;
+      padding: 5px;
+      margin-bottom: 12px;
+    }
+    .tab {
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      text-align: center;
+      padding: 8px 0;
+      color: #5f7288;
+    }
+    .tab.active {
+      color: #2866bf;
+      background: linear-gradient(180deg, #ffffff, #e6f2ff);
+      border: 1px solid #cfe1f6;
+    }
+    .card {
+      border: 1px solid #d9e4f2;
+      border-radius: 16px;
+      padding: 12px;
+      background: #fff;
+      margin-bottom: 10px;
+    }
+    .label {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.08em;
+      color: #6b7f95;
+      margin-bottom: 8px;
+      text-transform: uppercase;
+    }
+    textarea {
+      width: 100%;
+      height: 92px;
+      border: 1px solid #d8e4f2;
+      border-radius: 12px;
+      background: #fbfdff;
+      padding: 10px;
+      resize: none;
+      font-size: 12px;
+      color: #3a4f66;
+      line-height: 1.5;
+      font-family: inherit;
+    }
+    .target {
+      margin-top: 8px;
+      width: 100%;
+      border: 1px solid #d8e4f2;
+      border-radius: 10px;
+      background: #fff;
+      padding: 8px 10px;
+      font-size: 12px;
+      color: #2f4660;
+    }
+    .result {
+      border: 1px solid #d7eadf;
+      background: #f3fff9;
+      color: #214b39;
+      border-radius: 12px;
+      padding: 10px;
+      font-size: 12px;
+      line-height: 1.55;
+      min-height: 78px;
+    }
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 10px;
+    }
+    .btn {
+      border-radius: 999px;
+      border: 1px solid #cde0f6;
+      background: #fff;
+      color: #356293;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 7px 12px;
+    }
+    .btn.primary {
+      background: linear-gradient(180deg, #48a2e7, #2f80d6);
+      border-color: #2f80d6;
+      color: #fff;
+    }
+    .caption {
+      position: absolute;
+      left: 70px;
+      bottom: 34px;
+      font-size: 13px;
+      color: #5c6f86;
+      background: rgba(255,255,255,0.74);
+      border: 1px solid #d4dff0;
+      padding: 8px 12px;
+      border-radius: 999px;
+      backdrop-filter: blur(8px);
+    }
+  </style>
+</head>
+<body>
+  <div class="frame">
+    <section class="web">
+      <div class="toolbar">
+        <div class="dot"></div><div class="dot"></div><div class="dot"></div>
+        <div class="addr">https://example.com/docs/release-notes</div>
+      </div>
+      <div class="page">
+        <h1 class="title">Floator in your reading flow</h1>
+        <p class="subtitle">Select any sentence and translate in seconds, without leaving the page.</p>
+        <div class="bubble">The latest update improves multi-turn follow-up and markdown rendering for technical content.</div>
+        <div class="bubble">You can ask AI to rewrite unclear lines and keep the original context nearby.</div>
+        <div class="bubble"><span class="selected">Hover to translate selected text</span> and continue reading naturally.</div>
+      </div>
+    </section>
+
+    <aside class="popup">
+      <div class="head">
+        <div>
+          <span class="kicker">LM API SERVER</span>
+          <h2>Floator</h2>
+          <p>Translate long text with target language controls.</p>
+        </div>
+        <span class="lang">EN</span>
+      </div>
+
+      <div class="tabs">
+        <div class="tab active">Translator</div>
+        <div class="tab">Settings</div>
+      </div>
+
+      <div class="card">
+        <div class="label">I need...</div>
+        <textarea>Could you summarize this paragraph in concise Chinese while preserving technical terms?</textarea>
+        <div class="target">Target language: 中文 | Chinese</div>
+      </div>
+
+      <div class="card">
+        <div class="label">Result</div>
+        <div class="result">请将这段内容概括为简洁中文，同时保留关键技术术语与上下文含义，避免遗漏版本信息和操作步骤。</div>
+        <div class="actions">
+          <span class="btn">Copy</span>
+          <span class="btn primary">Trans</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="caption">Scenario 1 · Popup translator with target language and copy action</div>
+</body>
+</html>

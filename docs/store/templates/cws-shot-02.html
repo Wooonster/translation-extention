@@ -1,0 +1,238 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Floator - In-page Floating Translation</title>
+  <style>
+    :root {
+      --ink: #1f2d3d;
+      --ink-soft: #60748b;
+      --accent: #ea8b2b;
+      --accent-soft: #fff2e6;
+      --panel: #fffdfa;
+      --line: #e3d9cc;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      width: 1280px;
+      height: 800px;
+      font-family: "Avenir Next", "Segoe UI", sans-serif;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 12% 8%, #ffe9d2 0, transparent 34%),
+        radial-gradient(circle at 88% 12%, #fff1dc 0, transparent 32%),
+        linear-gradient(160deg, #fffefc 0%, #fff8ef 42%, #fff5ea 100%);
+      overflow: hidden;
+      position: relative;
+    }
+    .workspace {
+      width: 1180px;
+      height: 700px;
+      margin: 50px;
+      border-radius: 28px;
+      border: 1px solid #e5d8c8;
+      box-shadow: 0 30px 58px -36px rgba(97, 63, 22, 0.35);
+      background: #fff;
+      overflow: hidden;
+      position: relative;
+    }
+    .top {
+      height: 50px;
+      border-bottom: 1px solid #efe4d8;
+      background: linear-gradient(180deg, #fffdf9, #fff7ef);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      color: #8e7355;
+      font-size: 13px;
+    }
+    .brand {
+      font-weight: 700;
+      letter-spacing: 0.05em;
+      text-transform: uppercase;
+    }
+    .pill {
+      border: 1px solid #ecd8bf;
+      background: #fff;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 11px;
+      color: #8e7355;
+    }
+    .content {
+      padding: 34px 38px;
+      line-height: 1.72;
+      font-size: 18px;
+      color: #2d4058;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 40px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+    p { margin: 0 0 16px; }
+    mark {
+      background: #ffe9ad;
+      padding: 1px 5px;
+      border-radius: 6px;
+    }
+    .float {
+      position: absolute;
+      left: 740px;
+      top: 182px;
+      width: 390px;
+      border-radius: 24px;
+      border: 1px solid var(--line);
+      background:
+        radial-gradient(circle at top left, #ffe8d2 0, transparent 40%),
+        linear-gradient(180deg, #fffefb, #fff5ea);
+      box-shadow: 0 24px 56px -34px rgba(78, 45, 12, 0.45);
+      overflow: hidden;
+    }
+    .float-head {
+      padding: 14px 16px 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #efe0cf;
+    }
+    .float-title {
+      margin: 0;
+      font-family: "Iowan Old Style", Georgia, serif;
+      font-size: 15px;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .float-title::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: linear-gradient(135deg, #f0a347, #d97211);
+      box-shadow: 0 0 0 5px rgba(240, 163, 71, 0.2);
+    }
+    .close {
+      width: 28px;
+      height: 28px;
+      border: 1px solid #e8d9c8;
+      border-radius: 999px;
+      background: #fff;
+      color: #8b735a;
+      display: grid;
+      place-items: center;
+      font-size: 16px;
+      line-height: 1;
+    }
+    .source {
+      margin: 12px 16px 8px;
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: 0.15em;
+      text-transform: uppercase;
+      color: #8a6d4d;
+    }
+    .result {
+      margin: 0 16px 14px;
+      font-size: 14px;
+      line-height: 1.65;
+      color: #2b4058;
+    }
+    .result strong { color: #9c5510; }
+    .footer {
+      border-top: 1px solid #efdfce;
+      padding: 12px 16px 16px;
+      background: linear-gradient(180deg, #fff9f2, #fff4e8);
+    }
+    .ask {
+      border: 1px solid #ead8c1;
+      border-radius: 12px;
+      background: #fffefc;
+      padding: 10px;
+      font-size: 12px;
+      color: #5f6f81;
+    }
+    .actions {
+      margin-top: 10px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #8c6f51;
+      font-size: 11px;
+    }
+    .btn {
+      border: 1px solid #e4cfb3;
+      border-radius: 999px;
+      padding: 6px 10px;
+      background: #fff;
+      font-weight: 700;
+      color: #9a5d20;
+    }
+    .tip {
+      position: absolute;
+      left: 72px;
+      bottom: 32px;
+      font-size: 13px;
+      color: #896b4a;
+      border: 1px solid #e8d6c2;
+      border-radius: 999px;
+      background: rgba(255, 253, 249, 0.92);
+      backdrop-filter: blur(8px);
+      padding: 8px 12px;
+    }
+    .callout {
+      position: absolute;
+      left: 688px;
+      top: 168px;
+      width: 24px;
+      height: 24px;
+      border-left: 2px solid #da8123;
+      border-top: 2px solid #da8123;
+      transform: rotate(45deg);
+      border-radius: 2px;
+    }
+  </style>
+</head>
+<body>
+  <div class="workspace">
+    <div class="top">
+      <span class="brand">Floator Reading Mode</span>
+      <span class="pill">Hover translate: 3s</span>
+    </div>
+
+    <div class="content">
+      <h1>Read first, ask later</h1>
+      <p>Floator keeps you in context by translating exactly where you are reading.</p>
+      <p>When you select a sentence such as <mark>"The model should preserve technical nouns and version numbers"</mark>, the extension opens a lightweight floating panel with source language detection.</p>
+      <p>You can continue with follow-up prompts, copy the answer, or close the panel without breaking your flow.</p>
+      <p>It is designed for documentation reading, multilingual research, and everyday bilingual browsing.</p>
+    </div>
+
+    <div class="callout"></div>
+
+    <aside class="float">
+      <div class="float-head">
+        <h2 class="float-title">Translation</h2>
+        <div class="close">×</div>
+      </div>
+      <div class="source">Source: English</div>
+      <div class="result"><strong>模型应保留技术名词与版本号。</strong><br/>这样可以减少术语误译，保证你在阅读文档和排查问题时不会丢失关键信息。</div>
+      <div class="footer">
+        <div class="ask">Ask AI: Can you rewrite this in simpler Chinese for beginners?</div>
+        <div class="actions">
+          <span>Follow-up ready</span>
+          <span class="btn">Copy</span>
+        </div>
+      </div>
+    </aside>
+  </div>
+
+  <div class="tip">Scenario 2 · In-page floating translation with source language and follow-up</div>
+</body>
+</html>

@@ -1,5 +1,54 @@
 export type ApiProvider = 'lmStudio' | 'lmApiServer' | 'ollama'
 
+export const USER_LANGUAGES = ['en', 'zh', 'fr', 'de', 'es', 'ar', 'hi', 'ru', 'pt'] as const
+
+export type UserLanguage = (typeof USER_LANGUAGES)[number]
+
+export type InterfaceSide = 'en' | 'user'
+
+export type InterfaceLanguage = UserLanguage
+
+export const USER_LANGUAGE_ENDONYM: Record<UserLanguage, string> = {
+  en: 'English',
+  zh: '中文',
+  fr: 'Français',
+  de: 'Deutsch',
+  es: 'Español',
+  ar: 'العربية',
+  hi: 'हिन्दी',
+  ru: 'Русский',
+  pt: 'Português',
+}
+
+const USER_LANGUAGE_SET = new Set<string>(USER_LANGUAGES)
+
+export const isUserLanguage = (value: unknown): value is UserLanguage =>
+  typeof value === 'string' && USER_LANGUAGE_SET.has(value)
+
+export const isInterfaceSide = (value: unknown): value is InterfaceSide =>
+  value === 'en' || value === 'user'
+
+export const textDirectionFor = (language: UserLanguage): 'ltr' | 'rtl' =>
+  language === 'ar' ? 'rtl' : 'ltr'
+
+export const interfaceLanguageFor = (userLanguage: UserLanguage, interfaceSide: InterfaceSide): InterfaceLanguage =>
+  interfaceSide === 'en' ? 'en' : userLanguage
+
+export const resolveUserLanguage = (stored: { userLanguage?: unknown; interfaceLanguage?: unknown } | null | undefined): UserLanguage => {
+  if (isUserLanguage(stored?.userLanguage)) return stored.userLanguage
+  const legacy = stored?.interfaceLanguage
+  if (legacy === 'en' || legacy === 'zh') return legacy
+  return 'zh'
+}
+
+export const resolveInterfaceSide = (
+  stored: { interfaceSide?: unknown } | null | undefined,
+  userLanguage: UserLanguage,
+): InterfaceSide => {
+  if (isInterfaceSide(stored?.interfaceSide)) return stored.interfaceSide
+  return userLanguage === 'zh' ? 'user' : 'en'
+}
+
 export interface ProviderConfig {
   apiUrl: string
   apiKey: string
@@ -20,7 +69,8 @@ export interface AppConfig {
   keepAliveEnabled: boolean
   keepAliveIntervalSec: number
   hoverDurationMs: number
-  interfaceLanguage: 'en' | 'zh'
+  userLanguage: UserLanguage
+  interfaceSide: InterfaceSide
 }
 
 export const HOVER_DURATION_MIN_MS = 200
@@ -61,7 +111,8 @@ export const DEFAULT_CONFIG: AppConfig = {
   keepAliveEnabled: false,
   keepAliveIntervalSec: 60,
   hoverDurationMs: HOVER_DURATION_DEFAULT_MS,
-  interfaceLanguage: 'en',
+  userLanguage: 'zh',
+  interfaceSide: 'user',
 }
 
 const clampHoverDuration = (value: unknown): number => {
@@ -100,15 +151,6 @@ const buildProviders = (storedConfig: Partial<AppConfig>): Record<ApiProvider, P
   return providers
 }
 
-const detectSystemInterfaceLanguage = (): AppConfig['interfaceLanguage'] => {
-  try {
-    const ui = chrome.i18n.getUILanguage().toLowerCase()
-    return ui.startsWith('zh') ? 'zh' : 'en'
-  } catch {
-    return 'en'
-  }
-}
-
 export const saveConfig = async (config: AppConfig): Promise<void> => {
   const current = config.providers?.[config.activeApiProvider] || DEFAULT_PROVIDER_CONFIGS[config.activeApiProvider]
   const next: AppConfig = {
@@ -128,7 +170,7 @@ export const saveConfig = async (config: AppConfig): Promise<void> => {
 
 export const getConfig = async (): Promise<AppConfig> => {
   const result = await chrome.storage.sync.get('config')
-  const storedConfig = (result.config || {}) as Partial<AppConfig>
+  const storedConfig = (result.config || {}) as Partial<AppConfig> & { interfaceLanguage?: unknown }
 
   const activeApiProvider: ApiProvider =
     storedConfig.activeApiProvider === 'lmStudio' || storedConfig.activeApiProvider === 'lmApiServer' || storedConfig.activeApiProvider === 'ollama'
@@ -137,16 +179,17 @@ export const getConfig = async (): Promise<AppConfig> => {
 
   const providers = buildProviders(storedConfig)
   const activeProviderConfig = providers[activeApiProvider]
-  const interfaceLanguage =
-    storedConfig.interfaceLanguage === 'en' || storedConfig.interfaceLanguage === 'zh'
-      ? storedConfig.interfaceLanguage
-      : detectSystemInterfaceLanguage()
+  const userLanguage = resolveUserLanguage(storedConfig)
+  const interfaceSide = resolveInterfaceSide(storedConfig, userLanguage)
+  const storedWithoutLegacy = { ...storedConfig }
+  delete storedWithoutLegacy.interfaceLanguage
 
   const merged = {
     ...DEFAULT_CONFIG,
-    ...storedConfig,
+    ...storedWithoutLegacy,
     floatingStreamEnabled: storedConfig.floatingStreamEnabled === true,
-    interfaceLanguage,
+    userLanguage,
+    interfaceSide,
     activeApiProvider,
     providers,
     apiUrl: activeProviderConfig.apiUrl,

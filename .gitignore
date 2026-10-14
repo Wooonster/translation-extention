@@ -26,3 +26,6 @@ dist-ssr
 # Build artifacts
 *.zip
 **.trae
+
+# Local agent files
+skills-lock.json
