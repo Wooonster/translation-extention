@@ -45,7 +45,7 @@ Floator is for anyone who reads the web in another language and wants the meanin
 
 ![Popup Bank with IPA, part of speech on single words, an English gloss, a Chinese translation, and an add count. The phrase row has no part of speech.](docs/store/screenshots/popup-bank.png)
 
-![Your language control, with En on the left and 中文 on the right](docs/store/screenshots/user-language.png)
+![Your language control with En selected and 中文 on the right](docs/store/screenshots/user-language.png)
 
 ## Install
 
