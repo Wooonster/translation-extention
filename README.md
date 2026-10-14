@@ -41,13 +41,11 @@ Floator is for anyone who reads the web in another language and wants the meanin
 
 ## Screenshots
 
-Store listing scenes for the popup and the in-page card.
+![Floating card on a page, with the Chinese translation, the original sentence unfolded, and icon-only ask, save, and copy actions](docs/store/screenshots/floating-card.png)
 
-![Popup translator with a target language and a copy action](docs/store/screenshots/cws-shot-01-1280x800.jpg)
+![Popup Bank with IPA, part of speech on single words, an English gloss, a Chinese translation, and an add count. The phrase row has no part of speech.](docs/store/screenshots/popup-bank.png)
 
-![Floating translation card with the source language and a follow-up](docs/store/screenshots/cws-shot-02-1280x800.jpg)
-
-The HTML used to compose these boards is in [`docs/store/templates`](docs/store/templates).
+![Your language control, with En on the left and 中文 on the right](docs/store/screenshots/user-language.png)
 
 ## Install
 
