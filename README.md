@@ -41,11 +41,11 @@ Floator is for anyone who reads the web in another language and wants the meanin
 
 ## Screenshots
 
-![Floating card on a page, with the Chinese translation, the original sentence unfolded, and icon-only ask, save, and copy actions](docs/store/screenshots/floating-card.png)
+![Floating card on the Harbor page, with the Chinese translation, the original sentence unfolded, and icon-only ask, save, and copy actions](docs/store/screenshots/floating-card.png)
 
-![Popup Bank with IPA, part of speech on single words, an English gloss, a Chinese translation, and an add count. The phrase row has no part of speech.](docs/store/screenshots/popup-bank.png)
+![The same Harbor page and card on the chat page, with a short follow-up and its answer](docs/store/screenshots/floating-chat.png)
 
-![Your language control with En selected and 中文 on the right](docs/store/screenshots/user-language.png)
+![Popup on the Harbor page. The Bank lists harbor, luminous, and the phrase at anchor, with pronunciation, part of speech on the single words, an English gloss, a Chinese translation, and an add count. The phrase has no part of speech.](docs/store/screenshots/popup-bank.png)
 
 ## Install
 
