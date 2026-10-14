@@ -45,7 +45,7 @@ Floator is for anyone who reads the web in another language and wants the meanin
 
 ![The same Harbor page and card on the chat page, with a short follow-up and its answer](docs/store/screenshots/floating-chat.png)
 
-![Popup on the Harbor page with the Bank still open. En is selected beside 中文, and the provider control shows LLM Server API, LM Studio, and Ollama. The list has pronunciation, part of speech on the single words, an English gloss, a Chinese translation, and an add count. The phrase at anchor has no part of speech.](docs/store/screenshots/popup-bank.png)
+![Popup on the Harbor page. The Bank lists harbor, luminous, and the phrase at anchor, with pronunciation, part of speech on the single words, an English gloss, a Chinese translation, and an add count. The phrase has no part of speech.](docs/store/screenshots/popup-bank.png)
 
 ## Install
 
