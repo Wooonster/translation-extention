@@ -6,7 +6,7 @@ Select a sentence, rest the pointer, and a card appears beside it. Ask a follow-
 
 [![Version 1.2.0](https://img.shields.io/badge/version-1.2.0-3d7a72)](CHANGELOG.md)
 [![Chrome Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-555555)](src/manifest.ts)
-[![MIT License](https://img.shields.io/badge/license-MIT-8aa)](LICENSE)
+[![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-8aa)](LICENSE)
 
 Floator is for anyone who reads the web in another language and wants the meaning without leaving the sentence. The Chinese name is 浮译. The English name is Floator.
 
@@ -107,7 +107,7 @@ That builds `dist/` and writes `floator-<version>.zip` in the repo root. Zip fil
 
 What leaves the browser, and what stays in local storage, is described in [PRIVACY.md](PRIVACY.md).
 
-Floator is [MIT](LICENSE) licensed.
+Floator is [Apache-2.0](LICENSE) licensed.
 
 ## Milestones
 

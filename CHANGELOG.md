@@ -1,5 +1,8 @@
 # Changelog
 
+## Unreleased
+- License changed from MIT to Apache-2.0
+
 ## 1.2.0
 - Local vocabulary bank on this device: save a word or a phrase from the floating card, with pronunciation, meanings, a part of speech for a single word, and the page it came from
 - User language: an English interface, or the interface in the language you choose, with that language kept as the default translation target
