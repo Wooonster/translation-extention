@@ -6,9 +6,7 @@
 
 选中后指针悬浮，在原文下方即可弹出翻译卡片。可以复制结果、保存到词库或者直接在原地追问 AI 更多细节。
 
-<video src="docs/marketing/landscape.mp4" controls width="100%"></video>
-
-[横屏介绍视频](docs/marketing/landscape.mp4)
+https://github.com/user-attachments/assets/70054edc-b62e-4263-bda0-f5434d951377
 
 [![Version 1.2.0](https://img.shields.io/badge/version-1.2.0-3d7a72)](CHANGELOG.md)
 [![Chrome Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-555555)](src/manifest.ts)

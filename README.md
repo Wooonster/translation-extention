@@ -6,6 +6,8 @@ Floating translation for the page you are already reading.
 
 Select a sentence, rest the pointer, and a card appears beside it. Ask a follow-up, copy the result, or save the word. Longer passages go in the popup, next to a vocabulary bank that stays on this device.
 
+https://github.com/user-attachments/assets/70054edc-b62e-4263-bda0-f5434d951377
+
 [![Version 1.2.0](https://img.shields.io/badge/version-1.2.0-3d7a72)](CHANGELOG.md)
 [![Chrome Manifest V3](https://img.shields.io/badge/Chrome-Manifest%20V3-555555)](src/manifest.ts)
 [![Apache-2.0](https://img.shields.io/badge/license-Apache--2.0-8aa)](LICENSE)
