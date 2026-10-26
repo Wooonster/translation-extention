@@ -1,5 +1,7 @@
 # 浮译 / Floator
 
+[简体中文](README.zh-CN.md)
+
 Floating translation for the page you are already reading.
 
 Select a sentence, rest the pointer, and a card appears beside it. Ask a follow-up, copy the result, or save the word. Longer passages go in the popup, next to a vocabulary bank that stays on this device.
